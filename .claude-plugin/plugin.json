@@ -1,0 +1,19 @@
+{
+  "name": "git-file-tree",
+  "version": "0.3.0",
+  "description": "A git pane for Claude Code: review what Claude changed (per prompt, uncommitted or the whole branch), read diffs and rendered Markdown, then stage, commit, push and open a PR without leaving the terminal.",
+  "author": {
+    "name": "Cosmin B"
+  },
+  "license": "MIT",
+  "keywords": [
+    "git",
+    "file-tree",
+    "diff",
+    "review",
+    "commit",
+    "markdown",
+    "pane"
+  ],
+  "types": "./types/index.d.ts"
+}

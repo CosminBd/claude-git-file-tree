@@ -1,0 +1,13 @@
+{
+  "name": "claude-git-file-tree",
+  "description": "A git pane for Claude Code: review what Claude changed, then stage, commit, push and open a PR without leaving the terminal.",
+  "owner": {
+    "name": "Cosmin B"
+  },
+  "plugins": [
+    {
+      "name": "git-file-tree",
+      "source": "./"
+    }
+  ]
+}
