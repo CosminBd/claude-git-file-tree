@@ -108,6 +108,9 @@ export type PreviewMode = 'diff' | 'source' | 'rendered'
 
 export type PreviewImage = { file: string; width: number; height: number }
 
+/** Where a block of a single-file component (.vue, .svelte) starts, 1-based, and the language it draws in. */
+export type CodeSection = { line: number; language: string }
+
 export type Preview = {
   path: string
   mode: PreviewMode
@@ -120,6 +123,8 @@ export type Preview = {
   /** The 1-based line the page starts at, for a source page. */
   firstLine?: number
   totalLines?: number
+  /** A single-file component's blocks, over the whole file: each draws in its own language. */
+  sections?: CodeSection[]
   note?: string
   image?: PreviewImage
 }

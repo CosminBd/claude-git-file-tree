@@ -1,6 +1,6 @@
 import type { ElementTable, RenderElement, RenderInput } from 'claude-code'
 
-import type { Activity, ActivityKind, AgentWork, ChangedFile, CommitInfo, FileStatus, PreviewMode, Snapshot } from '../types'
+import type { Activity, ActivityKind, AgentWork, ChangedFile, CodeSection, CommitInfo, FileStatus, PreviewMode, Snapshot } from '../types'
 import * as A from './actions'
 import type { Io } from './actions'
 import { displayWidth, layoutTable, parseBlocks } from './markdown'
@@ -621,10 +621,14 @@ const renderPreview = async (c: Ctx): Promise<RenderElement> => {
   let content: RenderElement
   switch (shown.kind) {
     case 'diff':
-      content = <Code source={shown.text} format="diff" path={shown.path} />
+      content = shown.sections
+        ? sectionedDiff(c, shown.text, shown.sections)
+        : <Code source={shown.text} format="diff" path={shown.path} />
       break
     case 'code':
-      content = <Code source={shown.text} path={shown.path} startLine={shown.firstLine ?? 1} />
+      content = shown.sections
+        ? sectionedSource(c, shown.text, shown.firstLine ?? 1, shown.sections)
+        : <Code source={shown.text} path={shown.path} startLine={shown.firstLine ?? 1} />
       break
     case 'markdown':
       content = renderMarkdown(c, shown.text, Math.max(20, bodyColumns - 1))
@@ -718,6 +722,75 @@ const renderPreview = async (c: Ctx): Promise<RenderElement> => {
       {pager}
     </Box>
   )
+}
+
+const languageAt = (sections: CodeSection[], line: number): string => sections.findLast(section => section.line <= line)?.language ?? 'html'
+
+/** A page of a single-file component: one Code per run of lines in one language, numbered on from the page's first. */
+const sectionedSource = (c: Ctx, text: string, firstLine: number, sections: CodeSection[]) => {
+  const { Box, Code } = c.t
+  const runs: { line: number; language: string; lines: string[] }[] = []
+  text.split('\n').forEach((source, i) => {
+    const language = languageAt(sections, firstLine + i)
+    const run = runs.at(-1)
+    if (run?.language === language) run.lines.push(source)
+    else runs.push({ line: firstLine + i, language, lines: [source] })
+  })
+
+  // Each Code sizes its gutter to its own last number: indent the narrower ones, so the numbers line up.
+  const digits = (line: number) => String(line).length
+  const widest = digits(firstLine + text.split('\n').length - 1)
+
+  return (
+    <Box flexDirection="column">
+      {runs.map(run => (
+        <Box key={`run:${run.line}`} paddingLeft={widest - digits(run.line + run.lines.length - 1)}>
+          <Code source={run.lines.join('\n')} language={run.language} startLine={run.line} />
+        </Box>
+      ))}
+    </Box>
+  )
+}
+
+/** A single-file component's diff: each hunk in the language of the block its first change is in. */
+const sectionedDiff = (c: Ctx, text: string, sections: CodeSection[]) => {
+  const { Box, Code, Text } = c.t
+  const hunks = text.split(/\n(?=@@ )/)
+  // As for the source: each hunk's gutter fits its own numbers, so the narrower ones are indented.
+  const digits = hunks.map(hunk => {
+    const [, older = 0, olderCount = 1, newer = 0, newerCount = 1] = (/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))?/.exec(hunk) ?? []).map(group => (group === undefined ? undefined : Number(group)))
+
+    return String(Math.max(older + olderCount - 1, newer + newerCount - 1, 1)).length
+  })
+  const widest = Math.max(...digits)
+
+  return (
+    <Box flexDirection="column">
+      {hunks.map((hunk, i) => (
+        <Box key={`hunk:${i}`} flexDirection="column">
+          {/* The gap between hunks, as one Code draws it. */}
+          {i > 0 ? <Text dimColor>...</Text> : null}
+          <Box paddingLeft={widest - (digits[i] ?? widest)}>
+            <Code source={hunk} format="diff" language={languageAt(sections, firstChangeLine(hunk))} />
+          </Box>
+        </Box>
+      ))}
+    </Box>
+  )
+}
+
+/** The line of a hunk's first change: on the new side, or the old one for a file the change deletes. */
+const firstChangeLine = (hunk: string): number => {
+  const header = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(hunk)
+  let older = Number(header?.[1] ?? 1)
+  let newer = Number(header?.[2] ?? 1)
+  for (const line of hunk.split('\n').slice(1)) {
+    if (line.startsWith('+') || line.startsWith('-')) return newer > 0 ? newer : older
+    older += 1
+    newer += 1
+  }
+
+  return newer
 }
 
 /** One commit of the history, bold while the tree shows it. */

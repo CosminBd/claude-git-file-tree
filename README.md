@@ -16,7 +16,7 @@ The pane shows:
 
 - The changed files, with a letter and a color for each type of change.
 - The diff of each file.
-- The source of each file, with syntax highlighting.
+- The source of each file, with syntax highlighting. In Vue and Svelte files, each block has the highlighting of its language: TypeScript or JavaScript, HTML, CSS or SCSS.
 - Markdown files, rendered. The pane has a built-in Markdown viewer.
 - The commit history of the current branch.
 - The git operations for the current branch: stage, commit, push, and create a PR.
