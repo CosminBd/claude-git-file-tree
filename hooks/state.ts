@@ -20,6 +20,8 @@ export const INITIAL: UiState = {
   preview: null,
   touched: null,
   activity: [],
+  agents: {},
+  agentView: null,
   filter: null,
   isOpen: false,
   isLoading: false,

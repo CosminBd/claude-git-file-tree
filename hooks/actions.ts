@@ -126,9 +126,48 @@ export const takePromptBase = async (io: Io, at: 'prompt' | 'session'): Promise<
   if (tree !== null) await S.put(io, 'promptBase', () => ({ tree, at }))
 }
 
+/** The git root of each folder asked about, so each folder costs one `git rev-parse`. */
+const toplevels = new Map<string, Promise<string | null>>()
+
+/** The root of the git work tree `absolutePath` lies in (a worktree's own), or null outside one. */
+const gitRootOf = async (io: Io, absolutePath: string): Promise<string | null> => {
+  // A file just written may sit in a folder git has not seen: go up to one that answers.
+  let folder = absolutePath.slice(0, absolutePath.lastIndexOf('/'))
+  for (let depth = 0; depth < 6 && folder !== ''; depth += 1) {
+    let found = toplevels.get(folder)
+    if (found === undefined) {
+      found = runGit(io, folder, ['rev-parse', '--show-toplevel']).then(
+        result => (result.exitCode === 0 ? result.stdout.trim() || null : null),
+        () => null,
+      )
+      toplevels.set(folder, found)
+    }
+    const root = await found
+    if (root !== null) return root
+    folder = folder.slice(0, folder.lastIndexOf('/'))
+  }
+
+  return null
+}
+
+/** The root of the session's own work tree, which the main conversation's marks are relative to. */
+export const sessionRoot = async (io: Io): Promise<string> => {
+  const cwd = await io.cwd()
+
+  return (await gitRootOf(io, `${cwd}/.`)) ?? cwd
+}
+
+/** Where the tree reads git: the session's folder, or the root of the subagent in view. */
+const viewRoot = async (io: Io): Promise<string> => {
+  const agentId = await S.pick(io, 'agentView')
+  const root = agentId === null ? null : ((await S.pick(io, 'agents'))[agentId]?.root ?? null)
+
+  return root ?? (await io.cwd())
+}
+
 const refreshOnce = async (io: Io, forcePreview: string | null): Promise<void> => {
   const mode = await S.pick(io, 'baseMode')
-  const cwd = await io.cwd()
+  const cwd = await viewRoot(io)
   const commit = await S.pick(io, 'commit')
   const base = mode === 'prompt' && commit === null ? await S.pick(io, 'promptBase') : null
   const now = base !== null ? await workTree(io, cwd, 'now') : null
@@ -179,8 +218,7 @@ export const refresh = async (io: Io, forcePreview: string | null = null): Promi
 export const noteEdit = async (io: Io, absolutePath: string | null): Promise<void> => {
   let relative: string | null = null
   if (absolutePath !== null) {
-    const snap = await S.pick(io, 'snapshot')
-    const root = snap?.root ?? (await io.cwd())
+    const root = await sessionRoot(io)
     relative = absolutePath.startsWith(`${root}/`) ? absolutePath.slice(root.length + 1) : null
     if (relative !== null && relative !== (await S.pick(io, 'touched'))) await S.put(io, 'touched', () => relative)
     if (relative !== null) await noteActivity(io, 'write', [relative])
@@ -208,7 +246,7 @@ export const noteActivity = async (io: Io, kind: ActivityKind, paths: readonly s
 
 /** Claude read a file with its Read tool. */
 export const noteRead = async (io: Io, absolutePath: string): Promise<void> => {
-  const path = toRelative(absolutePath, await rootOf(io))
+  const path = toRelative(absolutePath, await sessionRoot(io))
   if (path !== null) await noteActivity(io, 'read', [path])
 }
 
@@ -216,14 +254,14 @@ export const noteRead = async (io: Io, absolutePath: string): Promise<void> => {
 export const noteShell = async (io: Io, command: string, output: string, isReadOnly: boolean, isError: boolean): Promise<void> => {
   if (isCommit(command) && !isError) {
     await refresh(io)
-    const root = await rootOf(io)
+    const root = await sessionRoot(io)
     const shown = await gitOf(io)(['show', '--name-only', '--format=', '--no-renames', 'HEAD'], root)
     if (shown.exitCode === 0) await noteActivity(io, 'commit', shown.stdout.split('\n').map(line => line.trim()).filter(Boolean))
 
     return
   }
   if (isReadOnly) {
-    const root = await rootOf(io)
+    const root = await sessionRoot(io)
     const cwd = await io.cwd()
     const base = cwd.startsWith(`${root}/`) ? `${cwd.slice(root.length + 1)}/` : ''
     const known = new Set(await listAll(gitOf(io), root).catch(() => []))
@@ -232,6 +270,49 @@ export const noteShell = async (io: Io, command: string, output: string, isReadO
     return
   }
   await noteEdit(io, null)
+}
+
+/**
+ * A subagent read or wrote `absolutePath`: kept under its id, apart from the main conversation's marks.
+ * Its first file, and then each write, says where it works. Resolves the file's root, null outside git.
+ */
+export const noteAgent = async (io: Io, agentId: string, kind: ActivityKind, absolutePath: string): Promise<string | null> => {
+  const root = await gitRootOf(io, absolutePath)
+  if (root === null) return null
+  const main = await sessionRoot(io)
+  await io.set(state => {
+    const work = state.agents[agentId] ?? { root: null, isApart: false, activity: [] }
+    const agentRoot = work.root === null || kind !== 'read' ? root : work.root
+
+    return {
+      ...state,
+      agents: { ...state.agents, [agentId]: { root: agentRoot, isApart: agentRoot !== main, activity: mergeActivity(work.activity, kind, [absolutePath]) } },
+    }
+  })
+  if ((await S.pick(io, 'agentView')) === agentId) await refresh(io)
+
+  return root
+}
+
+/** The person switched the transcript in view: the tree follows that subagent's work, or the main conversation's. */
+export const followView = async (io: Io, agentId: string | null): Promise<void> => {
+  if ((await S.pick(io, 'agentView')) === agentId) return
+  const before = await viewRoot(io)
+  await S.put(io, 'agentView', () => agentId)
+  if ((await viewRoot(io)) !== before) {
+    // Another work tree: what the pane showed belongs to the old one.
+    await io.set(state => ({
+      ...state,
+      screen: 'tree',
+      preview: null,
+      commit: null,
+      log: null,
+      allFiles: null,
+      prForm: null,
+      git: { ...S.GIT_INITIAL, hasGh: state.git.hasGh },
+    }))
+  }
+  await refresh(io)
 }
 
 /** A new prompt: what Claude did before it is no longer news. */

@@ -133,6 +133,16 @@ export type Activity = {
   seq: number
 }
 
+/** What one subagent did, from its own tool calls. */
+export type AgentWork = {
+  /** The git root it works in: its worktree when it has one; null until it touches a file. */
+  root: string | null
+  /** True when `root` is not the session's own: the agent works in a worktree of its own. */
+  isApart: boolean
+  /** The files it read, wrote or committed; the paths are absolute. */
+  activity: Activity[]
+}
+
 /** Everything the pane and the band draw from: one value, so every write redraws both. */
 export type UiState = {
   snapshot: Snapshot | null
@@ -157,6 +167,10 @@ export type UiState = {
   touched: string | null
   /** The files Claude read, wrote or committed since the last prompt. */
   activity: Activity[]
+  /** What each subagent did, by its agent id. */
+  agents: Record<string, AgentWork>
+  /** The subagent whose transcript is in view, which the pane follows; null for the main conversation. */
+  agentView: string | null
   /** The filter text; null while the filter field is closed. */
   filter: string | null
   isOpen: boolean

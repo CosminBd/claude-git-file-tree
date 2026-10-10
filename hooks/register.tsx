@@ -9,11 +9,18 @@ import { renderFooter, renderPane } from './view'
 /** How often git is read while the pane is open; four times slower while it is closed. */
 const POLL_MS = 3000
 
+/** How soon the tree follows a switch to a subagent's transcript, or back. */
+const FOLLOW_MS = 250
+
 const ui = atom({ plugin: 'git-file-tree', key: 'ui' } as const, S.INITIAL)
 // The session keeps this value across reloads: a field added since it was written reads as its default.
 
 export const register: Register = on => {
   let ticks = 0
+  /** The transcript the pane's last drawing showed beside it: an agent id, null for the main one. */
+  let wanted: string | null = null
+  /** The transcript the tree follows now, as the ticker last set it; undefined until the first tick syncs it. */
+  let followed: string | null | undefined
   /** The engine's closures, built once the session starts; every hook after it works through them. */
   let io: Io | null = null
 
@@ -53,6 +60,12 @@ export const register: Register = on => {
     await A.loadPrefs(engine)
     void A.takePromptBase(engine, 'session').catch(() => undefined)
     void A.refresh(engine).catch(() => undefined)
+    // Follows the transcript in view: the drawing notes it, this tick (outside any drawing) switches the tree.
+    $.clock.every(FOLLOW_MS, () => {
+      if (wanted === followed) return
+      followed = wanted
+      void A.followView(engine, wanted).catch(() => undefined)
+    })
     $.clock.every(POLL_MS, () => {
       ticks += 1
       void (async () => {
@@ -95,22 +108,33 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     const result = await next(e)
     if (io === null) return result
+    const engine = io
     const tool = String(e.tool)
-    if (tool === 'Edit' || tool === 'Write' || tool === 'MultiEdit') {
-      const path = (e as { file_path?: unknown }).file_path
-      void A.noteEdit(io, typeof path === 'string' ? path : null).catch(() => undefined)
-    } else if (tool === 'NotebookEdit') {
-      const path = (e as { notebook_path?: unknown }).notebook_path
-      void A.noteEdit(io, typeof path === 'string' ? path : null).catch(() => undefined)
-    } else if (tool === 'Read') {
-      const path = (e as { file_path?: unknown }).file_path
-      if (typeof path === 'string') void A.noteRead(io, path).catch(() => undefined)
-    } else if (tool === 'Bash') {
-      const command = (e as { command?: unknown }).command
-      const done = result as { text?: string; isReadOnly?: true; isError?: true }
-      void A.noteShell(io, typeof command === 'string' ? command : '', done.text ?? '', done.isReadOnly === true, done.isError === true)
-        .catch(() => undefined)
+    const agentId = (e as { agentId?: unknown }).agentId
+    const filePath = (e as { file_path?: unknown; notebook_path?: unknown }).file_path ?? (e as { notebook_path?: unknown }).notebook_path
+    const path = typeof filePath === 'string' ? filePath : null
+    const isWrite = tool === 'Edit' || tool === 'Write' || tool === 'MultiEdit' || tool === 'NotebookEdit'
+
+    // The main conversation's marks; a subagent's count there too when it works in the session's own tree.
+    const noteMain = () => {
+      if (isWrite) void A.noteEdit(engine, path).catch(() => undefined)
+      else if (tool === 'Read' && path !== null) void A.noteRead(engine, path).catch(() => undefined)
+      else if (tool === 'Bash') {
+        const command = (e as { command?: unknown }).command
+        const done = result as { text?: string; isReadOnly?: true; isError?: true }
+        void A.noteShell(engine, typeof command === 'string' ? command : '', done.text ?? '', done.isReadOnly === true, done.isError === true)
+          .catch(() => undefined)
+      }
     }
+
+    if (typeof agentId !== 'string') noteMain()
+    else if (path !== null && (isWrite || tool === 'Read')) {
+      void A.noteAgent(engine, agentId, isWrite ? 'write' : 'read', path)
+        .then(async root => {
+          if (root === (await A.sessionRoot(engine))) noteMain()
+        })
+        .catch(() => undefined)
+    } else if (tool === 'Bash') void A.refresh(engine).catch(() => undefined)
 
     return result
   }).catch(($, e, next) => next(e))
@@ -126,8 +150,12 @@ export const register: Register = on => {
     if (io === null) return next(e)
     // Reads go through this drawing's own `$`, so a later write draws it again.
     const drawing: Io = { ...io, get: async () => ({ ...S.INITIAL, ...(await read($, ui)) }) }
+    // A drawing may not write, nor anything it starts: the follow tick of session.start makes the switch.
+    const viewed = e.props.view.agentId ?? null
+    wanted = viewed
+    const agent = viewed === null ? null : (await $.agent.list().catch(() => [])).find(info => info.id === viewed)
 
-    return renderPane({ io: drawing, t: $.ui.resolve(e), e })
+    return renderPane({ io: drawing, t: $.ui.resolve(e), e, agentLabel: agent?.description ?? agent?.name ?? null })
   })
 
   // The Files button, at the right of the prompt footer beside the mode labels.

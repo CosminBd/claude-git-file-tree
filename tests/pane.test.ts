@@ -1,6 +1,6 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
-import type { Engine } from 'claude-code/testing'
+import type { Engine, MockClock } from 'claude-code/testing'
 
 const ROOT = '/repo'
 
@@ -59,8 +59,14 @@ let ran: { args: string; stdin?: string }[] = []
 /** Answers a test puts over GIT, such as a status after a stage. */
 let answers: Record<string, { exitCode?: number; stdout: string }> = {}
 
+/** Answers for git run in another work tree (a subagent's worktree), by its root. */
+let trees: Record<string, Record<string, string>> = {}
+
 /** Files the plugin wrote. */
 let written: { path: string; text: string }[] = []
+
+/** The session's clock: `advance` runs the plugin's ticks. */
+let clock: MockClock
 
 const didRun = (args: string) => ran.some(entry => entry.args === args)
 
@@ -69,9 +75,10 @@ const world = (on: On) => {
   opened = []
   ran = []
   answers = {}
+  trees = {}
   written = []
   mock.store(on)
-  mock.clock(on)
+  clock = mock.clock(on)
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: ROOT }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
@@ -85,6 +92,12 @@ const world = (on: On) => {
     if (command === 'wc') return { value: { exitCode: 0, stdout: '      3 docs/NOTES.md\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     // Drop git's `-c key=value` pairs.
     const args = command === 'gh' ? `gh ${rest.join(' ')}` : rest.filter((arg, i) => arg !== '-c' && rest[i - 1] !== '-c').join(' ')
+    const tree = Object.keys(trees).find(root => e.init?.cwd?.startsWith(root))
+    if (tree !== undefined) {
+      const stdout = trees[tree]?.[args]
+
+      return { value: { exitCode: stdout === undefined ? 1 : 0, stdout: stdout ?? '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     ran.push({ args, ...(e.init?.stdin !== undefined ? { stdin: e.init.stdin } : {}) })
     const answer = answers[args] ?? GIT[args] ?? { exitCode: 1, stdout: '' }
 
@@ -487,4 +500,59 @@ test('Create PR starts from the template, pushes, and runs gh', async ($, on) =>
   expect(didRun('push')).toBe(true)
   expect(didRun('gh pr create --title Add the landing --body-file /repo/.git/PR_EDITMSG.md --base main --draft')).toBe(true)
   expect(await ui.find({ type: 'Text', text: '✓ Created https://github.com/o/r/pull/7' })).toBeDefined()
+})
+
+/** The subagents `$.agent.list()` answers. */
+const AGENTS = [{ id: 'agent-1', description: 'Fix the cart', type: 'general-purpose', status: 'running' as const }]
+
+test('viewing a subagent shows only the files it touched, without the git operations', async ($, on) => {
+  world(on)
+  on('tool.call', () => ({ result: {}, text: '' }) as never)
+  on('agent.list', () => ({ value: AGENTS }))
+  await start($)
+  await $.tool.call({ tool: 'Edit', file_path: '/repo/docs/NOTES.md', agentId: 'agent-1' } as never)
+  const ui = await $.ui.mount({ plugin: 'git-file-tree', surface: 'terminal', component: 'Pane', requestId: 'files', props: PANE_PROPS })
+  expect(await ui.find({ key: 'row:app/Http/Landing.php' })).toBeDefined()
+
+  await ui.redraw({ ...PANE_PROPS, view: { agentId: 'agent-1' } })
+  await clock.advance(300)
+  expect(await ui.find({ type: 'Text', text: 'Fix the cart' })).toBeDefined()
+  expect((await ui.find({ key: 'row:docs/NOTES.md' }))?.text).toMatch(/●$/)
+  expect(await ui.find({ key: 'row:app/Http/Landing.php' })).toBeUndefined()
+  expect(await ui.find({ key: 'stage-all' })).toBeUndefined()
+
+  // Back on the main conversation: every change, and the git operations.
+  await ui.redraw(PANE_PROPS)
+  await clock.advance(300)
+  expect(await ui.find({ type: 'Text', text: 'Fix the cart' })).toBeUndefined()
+  expect(await ui.find({ key: 'row:app/Http/Landing.php' })).toBeDefined()
+  expect(await ui.find({ key: 'stage-all' })).toBeDefined()
+})
+
+test('viewing a subagent in a worktree reads git in that worktree', async ($, on) => {
+  world(on)
+  const tree = '/repo/.claude/worktrees/cart'
+  // In the worktree, git answers for the worktree: one changed file of its own.
+  trees[tree] = {
+    'rev-parse --show-toplevel': `${tree}\n`,
+    'branch --show-current': 'worktree-cart\n',
+    'rev-parse --verify --quiet HEAD': 'abc\n',
+    'status --porcelain=v1 -z --untracked-files=all': ' M src/cart.ts\0',
+    'diff --numstat -z -M HEAD': '2\t1\tsrc/cart.ts\0',
+  }
+  on('tool.call', () => ({ result: {}, text: '' }) as never)
+  on('agent.list', () => ({ value: AGENTS }))
+  await start($)
+  await $.tool.call({ tool: 'Edit', file_path: `${tree}/src/cart.ts`, agentId: 'agent-1' } as never)
+  const ui = await $.ui.mount({ plugin: 'git-file-tree', surface: 'terminal', component: 'Pane', requestId: 'files', props: PANE_PROPS })
+  // The main tree does not show the worktree's file.
+  expect(await ui.find({ key: 'row:.claude/worktrees/cart/src/cart.ts' })).toBeUndefined()
+
+  await ui.redraw({ ...PANE_PROPS, view: { agentId: 'agent-1' } })
+  await clock.advance(300)
+  expect(await ui.find({ type: 'Text', text: 'worktree-cart' })).toBeDefined()
+  expect((await ui.find({ key: 'row:src/cart.ts' }))?.text).toMatch(/●$/)
+  expect(await ui.find({ key: 'row:app/Http/Landing.php' })).toBeUndefined()
+  // Its own tree: the git operations act on the worktree.
+  expect(await ui.find({ key: 'stage-all' })).toBeDefined()
 })

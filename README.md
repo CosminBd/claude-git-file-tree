@@ -78,6 +78,13 @@ The **Prompt** view shows only the files that changed during the last turn. It a
 
 When you send a prompt, the mod records a git tree of your files. The mod uses its own index (`.git/git-file-tree-*.index`). Your staged changes do not change.
 
+### Subagents
+
+When you view the transcript of a subagent, the pane shows the work of that subagent. When you go back to the main conversation, the pane shows all the changes again.
+
+- If the subagent works in your folder, the tree shows only the files that the subagent read or changed. The git operations are not available. To use them, go back to the main conversation.
+- If the subagent works in its own git worktree, the tree shows the changes in that worktree. The git operations operate on the worktree.
+
 ## Examine a file
 
 Click a file to open it. A changed file opens on its diff.

@@ -1,12 +1,12 @@
 import type { ElementTable, RenderElement, RenderInput } from 'claude-code'
 
-import type { Activity, ActivityKind, ChangedFile, CommitInfo, FileStatus, PreviewMode, Snapshot } from '../types'
+import type { Activity, ActivityKind, AgentWork, ChangedFile, CommitInfo, FileStatus, PreviewMode, Snapshot } from '../types'
 import * as A from './actions'
 import type { Io } from './actions'
 import { displayWidth, layoutTable, parseBlocks } from './markdown'
 import type { Span } from './markdown'
 import * as S from './state'
-import { ancestors } from './activity'
+import { ancestors, toRelative } from './activity'
 import { prLabel } from './ops'
 import { buildTree, flatten, matches, reviewOrder } from './tree'
 import type { Row } from './tree'
@@ -15,7 +15,13 @@ import type { Row } from './tree'
 type Gutter = { sign: '+' | '−'; paths: string[] } | null
 
 /** What a drawing works from: the engine's closures (reads subscribing this drawing), the surface's elements, the input. */
-export type Ctx = { io: Io; t: ElementTable; e: RenderInput }
+export type Ctx = {
+  io: Io
+  t: ElementTable
+  e: RenderInput
+  /** What the subagent in view is doing, as its Agent call described it; null or absent for the main conversation. */
+  agentLabel?: string | null
+}
 
 /** Rows drawn at most, so a huge expanded tree stays inside one drawing. */
 const MAX_ROWS = 1500
@@ -179,7 +185,16 @@ const branchLine = (c: Ctx, snap: { branch: string; upstream?: string; ahead?: n
 
 /** The git operations work on the working changes of the current branch: not on a past commit, not on the whole branch. */
 const isGitMode = async (c: Ctx, snap: Snapshot): Promise<boolean> =>
-  snap.commit === undefined && snap.error === undefined && (await S.pick(c.io, 'baseMode')) === 'head'
+  snap.commit === undefined && snap.error === undefined && (await S.pick(c.io, 'baseMode')) === 'head' && (await sharedAgent(c)) === null
+
+/** The subagent in view, when it works in the session's own tree: the tree shows only its files, with no git operations. */
+const sharedAgent = async (c: Ctx): Promise<AgentWork | null> => {
+  const agentId = await S.pick(c.io, 'agentView')
+  if (agentId === null) return null
+  const work = (await S.pick(c.io, 'agents'))[agentId] ?? { root: null, isApart: false, activity: [] }
+
+  return work.isApart ? null : work
+}
 
 /** A toggle drawn as all its options, the current one bold: `Changed · All`. */
 const choice = (c: Ctx, options: readonly string[], active: number) => {
@@ -327,7 +342,18 @@ const renderTree = async (c: Ctx): Promise<RenderElement> => {
   const isAll = view === 'all'
   const baseMode = await S.pick(c.io, 'baseMode')
   const filter = await S.pick(c.io, 'filter')
-  const activity = await S.pick(c.io, 'activity')
+  // With a subagent in view, its own marks; in the session's own tree, only the files it touched.
+  const agentId = await S.pick(c.io, 'agentView')
+  const agentWork = agentId === null ? null : ((await S.pick(c.io, 'agents'))[agentId] ?? { root: null, isApart: false, activity: [] })
+  const shared = agentWork !== null && !agentWork.isApart ? agentWork : null
+  const activity: Activity[] =
+    agentWork === null
+      ? await S.pick(c.io, 'activity')
+      : agentWork.activity.flatMap(entry => {
+          const path = toRelative(entry.path, snap.root)
+
+          return path === null ? [] : [{ ...entry, path }]
+        })
   const marks: Marks = {
     byPath: new Map(activity.map(entry => [entry.path, entry])),
     latest: activity.reduce((max, entry) => Math.max(max, entry.seq), 0),
@@ -340,6 +366,9 @@ const renderTree = async (c: Ctx): Promise<RenderElement> => {
   // A past commit shows its own files only.
   const isCommit = snap.commit !== undefined
   let paths: string[] = [...new Set([...snap.files.map(f => f.path), ...(isCommit ? [] : activity.map(entry => entry.path))])]
+  if (shared !== null && !isCommit) paths = [...new Set(activity.map(entry => entry.path))]
+  const agentPaths = new Set(paths)
+  const counted = shared !== null && !isCommit ? snap.files.filter(file => agentPaths.has(file.path)) : snap.files
   if (isAll) paths = [...new Set([...((await S.pick(c.io, 'allFiles')) ?? []), ...paths])]
   const isFiltering = filter !== null && filter.trim() !== ''
   if (isFiltering) paths = paths.filter(path => matches(path, filter))
@@ -402,7 +431,9 @@ const renderTree = async (c: Ctx): Promise<RenderElement> => {
 
   let empty: RenderElement | null = null
   if (rows.length === 0 && stagedRows.length === 0) {
-    empty = isFiltering ? (
+    empty = shared !== null && !isFiltering && !isCommit ? (
+      <Text dimColor>This agent has not read or changed a file yet.</Text>
+    ) : isFiltering ? (
       <Text dimColor>No file matches “{filter}”.</Text>
     ) : isAll ? (
       <Text dimColor>No files.</Text>
@@ -416,13 +447,25 @@ const renderTree = async (c: Ctx): Promise<RenderElement> => {
     )
   }
 
+  const agentLine =
+    agentWork === null ? null : (
+      <Box flexWrap="wrap">
+        <Text color="claude" bold>{'Agent '}</Text>
+        <Text bold>{c.agentLabel ?? 'subagent'}</Text>
+        <Text dimColor>
+          {agentWork.isApart && agentWork.root !== null ? `  in ${agentWork.root.split('/').slice(-2).join('/')}` : '  the files it read and changed'}
+        </Text>
+      </Box>
+    )
+
   return (
     <Box flexDirection="column">
+      {agentLine}
       <Box flexWrap="wrap">{...branchLine(c, snap)}</Box>
       <Box flexWrap="wrap">
         {snap.commit ? <Text>{`${snap.commit.short} ${snap.commit.subject}`}</Text> : <Text dimColor>{snap.baseMode === 'prompt' ? `since ${snap.baseLabel}` : `vs ${snap.baseLabel}`}</Text>}
-        <Text dimColor>{snap.files.length > 0 ? `  ${snap.files.length} changed ` : ''}</Text>
-        {...summaryParts(c, snap.files)}
+        <Text dimColor>{counted.length > 0 ? `  ${counted.length} changed ` : ''}</Text>
+        {...summaryParts(c, counted)}
       </Box>
       <Box flexWrap="wrap" columnGap={2}>
         <Button key="view" plain hotkey="a" onPress={() => A.toggleView(c.io)}>{...choice(c, ['Changed', 'All'], isAll ? 1 : 0)}</Button>
@@ -462,7 +505,11 @@ const renderTree = async (c: Ctx): Promise<RenderElement> => {
       {/* The git operations last, under the files they act on. */}
       <Box flexDirection="column" marginTop={1}>
         {gitMode ? await commitBox(c, staged.length) : null}
-        {gitMode ? await syncRow(c, snap) : <Text dimColor>{gitHint(isAll, isCommit, baseMode)}</Text>}
+        {gitMode ? (
+          await syncRow(c, snap)
+        ) : (
+          <Text dimColor>{shared !== null ? 'Stage, commit and push: go back to the main conversation.' : gitHint(isAll, isCommit, baseMode)}</Text>
+        )}
         {gitMode ? await statusLine(c) : null}
       </Box>
       {isFocused ? null : <Text dimColor>Click a file to preview. Click the pane (or ctrl+x tab) for the letter keys.</Text>}
