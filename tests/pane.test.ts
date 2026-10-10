@@ -261,6 +261,34 @@ test('Open hands the file to the system', async ($, on) => {
   expect(opened).toEqual([['open', '/repo/docs/NOTES.md']])
 })
 
+test('Mention names the selected lines in the prompt, or the whole file, a tree row its path', async ($, on) => {
+  world(on)
+  const filled: string[] = []
+  let selected: string | undefined
+  on('ui.selection', () => ({ value: selected === undefined ? undefined : { text: selected } }))
+  on('prompt.read', () => ({ value: { text: 'look at', cursor: 7 } }))
+  on('prompt.fill', ($, e) => {
+    filled.push(e.text)
+
+    return { isFilled: true }
+  })
+  await start($)
+  const ui = await $.ui.mount({ plugin: 'git-file-tree', surface: 'terminal', component: 'Pane', requestId: 'files', props: PANE_PROPS })
+  await ui.press({ key: 'row:app/Http/Landing.php' })
+  expect((await ui.find({ key: 'mention' }))?.text).toMatch(/@ File/)
+  await ui.press({ key: 'mention' })
+  selected = '// the change under review\nclass Landing {}'
+  await clock.advance(300)
+  expect((await ui.find({ key: 'mention' }))?.text).toMatch(/@ Lines 2–3/)
+  await ui.press({ key: 'mention' })
+  selected = '-// a line no diff has'
+  await ui.press({ key: 'mention' })
+  await ui.press({ key: 'back' })
+  await ui.press({ key: 'mention:docs/NOTES.md' })
+  expect(filled).toEqual([' @app/Http/Landing.php ', ' @app/Http/Landing.php#L2-3 ', ' @app/Http/Landing.php ', ' @docs/NOTES.md '])
+  expect(await ui.find({ key: 'mention:old.txt' })).toBeUndefined()
+})
+
 test('Prompt shows what changed since the last prompt, untracked files in', async ($, on) => {
   world(on)
   on('prompt.submit', (_$, e) => ({ text: e.text }))

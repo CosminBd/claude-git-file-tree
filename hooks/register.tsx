@@ -50,6 +50,9 @@ export const register: Register = on => {
       close: id => $.ui.close({ id }),
       toast: text => $.ui.toast(text),
       copy: async (text, surface) => (await $.ui.copy({ text, surface })).isCopied,
+      selection: async () => (await $.ui.selection())?.text ?? null,
+      promptBox: () => $.prompt.read(),
+      insert: async text => (await $.prompt.fill({ text, mode: 'insert' })).isFilled,
       fork: async prompt => {
         const reply = await $.model.fork({ prompt })
 
@@ -69,6 +72,7 @@ export const register: Register = on => {
     void A.refresh(engine).catch(() => undefined)
     // Follows the transcript in view: the drawing notes it, this tick (outside any drawing) switches the tree.
     $.clock.every(FOLLOW_MS, () => {
+      void A.watchSelection(engine).catch(() => undefined)
       if (wanted === followed) return
       followed = wanted
       void A.followView(engine, wanted, wantedName).catch(() => undefined)

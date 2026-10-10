@@ -1,12 +1,13 @@
 import type { ElementTable, RenderElement, RenderInput } from 'claude-code'
 
-import type { Activity, ActivityKind, AgentWork, ChangedFile, ColoredSpan, CommitInfo, FileStatus, PreviewMode, Snapshot } from '../types'
+import type { Activity, ActivityKind, AgentWork, ChangedFile, ColoredSpan, CommitInfo, FileStatus, Preview, PreviewMode, Snapshot } from '../types'
 import * as A from './actions'
 import type { Io } from './actions'
 import { displayWidth, layoutTable, parseBlocks } from './markdown'
 import type { Span } from './markdown'
 import * as S from './state'
 import { ancestors, toRelative } from './activity'
+import { pick } from './mention'
 import { prLabel } from './ops'
 import { buildTree, flatten, matches, reviewOrder } from './tree'
 import type { Row } from './tree'
@@ -119,7 +120,31 @@ const withGutter = (c: Ctx, row: Row, element: RenderElement, gutter: Gutter | u
 }
 
 const rowElement = (c: Ctx, row: Row, selected: string | null, marks: Marks, isAll: boolean, gutter?: Gutter) =>
-  withGutter(c, row, rowButton(c, row, selected, marks, isAll), gutter)
+  withGutter(c, row, withMention(c, row, rowButton(c, row, selected, marks, isAll)), gutter)
+
+/** What Mention would name: the selected lines when the open page has them, else the file. */
+const mentionLabel = (shown: Preview, selected: string | null): string => {
+  const picked = selected === null ? null : pick(shown, selected)
+  if (picked === null) return '@ File'
+  if ('diff' in picked) return '@ Selected lines'
+
+  return picked.from === picked.to ? `@ Line ${picked.from}` : `@ Lines ${picked.from}–${picked.to}`
+}
+
+/** A row with an `@` after it, faint until the row is hovered, that names the file or folder in the prompt; a deleted file has nothing to read. */
+const withMention = (c: Ctx, row: Row, element: RenderElement) => {
+  const { Box, Button, Text } = c.t
+  if (row.file?.status === 'deleted') return element
+
+  return (
+    <Box key={`entry:${row.key}`}>
+      {element}
+      <Button key={`mention:${row.path}`} plain dimColor hover={{ dimColor: false, color: 'claude', bold: true }} onPress={() => A.mention(c.io, row.path)}>
+        {' @'}
+      </Button>
+    </Box>
+  )
+}
 
 const rowButton = (c: Ctx, row: Row, selected: string | null, marks: Marks, isAll: boolean) => {
   const { Button, Text } = c.t
@@ -694,6 +719,7 @@ const renderPreview = async (c: Ctx): Promise<RenderElement> => {
         >
           Copy path
         </Button>
+        <Button key="mention" plain hotkey="r" onPress={() => A.mention(c.io, shown.path, true)}>{mentionLabel(shown, await S.pick(c.io, 'selected'))}</Button>
         {file?.status === 'deleted' || snap.commit !== undefined ? null : (
           <Button key="open-app" plain hotkey="o" onPress={() => A.openInApp(c.io, shown.path)}>Open</Button>
         )}

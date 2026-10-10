@@ -19,6 +19,7 @@ The pane shows:
 - The source of each file, with syntax highlighting. Vue and Svelte files use the same grammars as VS Code (a copy of [Shiki](https://shiki.style) in the mod), so the template, the script and the styles all have colors, in the source and in the diff.
 - Markdown files, rendered. The pane has a built-in Markdown viewer.
 - The commit history of the current branch.
+- Mentions: put a file, a folder, or the lines you select in the prompt, for Claude to read.
 - The git operations for the current branch: stage, commit, push, and create a PR.
 
 ## Install
@@ -102,8 +103,23 @@ Click a file to open it. A changed file opens on its diff.
 | `t` | Stage or unstage the file |
 | `x` | Discard the changes to the file. Push `x` two times to confirm |
 | `c` | Copy the path of the file |
+| `r` | Mention the file, or the selected lines, in the prompt. See [Mention files and lines](#mention-files-and-lines) |
 | `o` | Open the file in its default app |
 | `b` | Go back to the tree |
+
+### Mention files and lines
+
+You can put a file or some of its lines in the prompt, for Claude to read when you send the prompt:
+
+- To mention a file or a folder, click **@** at the end of its row in the tree. The **@** lights up when you point at the row. The prompt gets `@src/cart/cart.ts`.
+- To mention lines, select them with the mouse in the diff or the source. The button changes from **@ File** to **@ Lines 17–19**. Click it. The prompt gets `@src/cart/cart.ts#L17-19`. You can select part of a line: the mention takes the whole line.
+- With no lines selected, click **@ File** to mention the whole file.
+
+The mention goes where the cursor is in the prompt. Click again to add more files or lines.
+
+A mention names the file on disk. Lines that the file does not have go in the prompt as a quote instead: removed lines in a diff, the lines of a past commit, the lines of a deleted file.
+
+Mouse selection is available only in fullscreen mode. A selection moves the keyboard to the prompt: click the button, or push `ctrl+x tab` and then `r`.
 
 ### Markdown viewer
 

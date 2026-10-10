@@ -22,6 +22,7 @@ export const INITIAL: UiState = {
   activity: [],
   agents: {},
   agentView: null,
+  selected: null,
   filter: null,
   isOpen: false,
   isLoading: false,

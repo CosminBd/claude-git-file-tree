@@ -178,6 +178,8 @@ export type UiState = {
   agents: Record<string, AgentWork>
   /** The subagent whose transcript is in view, which the pane follows; null for the main conversation. */
   agentView: string | null
+  /** The text last selected with the mouse, read while a file is open: what Mention would name. */
+  selected: string | null
   /** The filter text; null while the filter field is closed. */
   filter: string | null
   isOpen: boolean

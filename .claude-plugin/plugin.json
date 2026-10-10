@@ -1,6 +1,6 @@
 {
   "name": "git-file-tree",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "A git pane for Claude Code: review what Claude changed (per prompt, uncommitted or the whole branch), read diffs and rendered Markdown, then stage, commit, push and open a PR without leaving the terminal.",
   "author": {
     "name": "Cosmin B"

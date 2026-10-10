@@ -10,6 +10,7 @@ import * as S from './state'
 import { cleanMessage, CONFIRM_MS, discardCommands, findTemplates, messagePrompt, outcomeOf, parsePrView, pathsOf } from './ops'
 import type { Outcome } from './ops'
 import { reviewOrder } from './tree'
+import { mentionOf, pick } from './mention'
 
 /**
  * What the actions need from the engine, as closures a hook builds where `$` is in scope
@@ -33,6 +34,12 @@ export type Io = S.StateIo & {
   close: (id: string) => Promise<void>
   toast: (text: string) => void
   copy: (text: string, surface: RenderSurface) => Promise<boolean>
+  /** The text last selected with the mouse, in the pane or the conversation; null with none. */
+  selection: () => Promise<string | null>
+  /** The prompt box: the draft so far and the cursor's offset into it. */
+  promptBox: () => Promise<{ text: string; cursor: number }>
+  /** Puts text in the prompt box at the cursor; false where no box takes it. */
+  insert: (text: string) => Promise<boolean>
   /** Asks the session's own model, over this conversation, with no tools: its reply, or why there is none. */
   fork: (prompt: string) => Promise<{ text: string } | { reason: string }>
 }
@@ -366,6 +373,54 @@ const openExternal = async (io: Io, target: string): Promise<boolean> => {
 export const openInApp = async (io: Io, path: string): Promise<void> => {
   const isOpened = await openExternal(io, `${await rootOf(io)}/${path}`)
   io.toast(isOpened ? `Opened ${path.slice(path.lastIndexOf('/') + 1)}` : 'Could not open it: no app is set for this file')
+}
+
+/**
+ * Names a file or folder in the prompt, as an `@` mention Claude Code reads when the prompt is sent. From the open
+ * file, the lines selected in it narrow the mention to those lines (`@src/a.ts#L12-20`); a selection the file no
+ * longer has (removed lines, a past commit) goes in quoted instead.
+ */
+const FENCE = '```'
+
+/** Keeps the mouse selection in the state while a file is open, so Mention can say what it would name. */
+export const watchSelection = async (io: Io): Promise<void> => {
+  const state = await io.get()
+  if (!state.isOpen || state.screen !== 'preview') return
+  const selected = await io.selection()
+  if (selected !== state.selected) await S.put(io, 'selected', () => selected)
+}
+
+export const mention = async (io: Io, path: string, fromPreview = false): Promise<void> => {
+  const snap = await S.pick(io, 'snapshot')
+  const root = snap?.root ?? (await io.cwd())
+  const cwd = await io.cwd()
+  const file = snap?.files.find(entry => entry.path === path)
+  const preview = fromPreview ? await S.pick(io, 'preview') : null
+  const selected = preview?.path === path ? await io.selection() : null
+  const picked = preview !== null && selected !== null ? pick(preview, selected) : null
+  let text = mentionOf(`${root}/${path}`, cwd)
+  let what = path
+  if (picked !== null && 'diff' in picked) {
+    text = `${text}, these lines of its diff:\n${FENCE}diff\n${picked.diff}\n${FENCE}\n`
+    what = 'the selected diff lines'
+  } else if (picked !== null && (snap?.commit !== undefined || file?.status === 'deleted')) {
+    // Lines the file on disk does not have: a past commit's, a deleted file's.
+    const lines = picked.from === picked.to ? `line ${picked.from}` : `lines ${picked.from}-${picked.to}`
+    const source = snap?.commit === undefined ? 'before it was deleted' : `as of commit ${snap.commit.short}`
+    text = `${text} ${source}, ${lines}:\n${FENCE}\n${picked.text}\n${FENCE}\n`
+    what = `the selected ${lines}`
+  } else if (picked !== null) {
+    text = mentionOf(`${root}/${path}`, cwd, picked)
+    what = picked.from === picked.to ? `line ${picked.from}` : `lines ${picked.from}-${picked.to}`
+  }
+  const box = await io.promptBox()
+  const before = box.text.slice(0, box.cursor)
+  const after = box.text.slice(box.cursor)
+  // A space apart from the words around it; a quote ends on its own line already.
+  const lead = before === '' || /\s$/.test(before) ? '' : ' '
+  const trail = text.endsWith('\n') || /^\s/.test(after) ? '' : ' '
+  const isInserted = await io.insert(`${lead}${text}${trail}`)
+  io.toast(isInserted ? `Mentioned ${what} in the prompt` : 'The prompt box is not available')
 }
 
 export const openUrl = async (io: Io, url: string): Promise<void> => {
