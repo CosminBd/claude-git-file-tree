@@ -294,9 +294,38 @@ export const noteAgent = async (io: Io, agentId: string, kind: ActivityKind, abs
   return root
 }
 
+/**
+ * The worktree of a subagent the pane has seen no file of (it started before the mod loaded, or works through
+ * the shell alone): Claude Code's own `agent-<id>` folder, else a branch or a folder named as the agent.
+ */
+const worktreeOf = async (io: Io, agentId: string, name: string | null): Promise<string | null> => {
+  const listed = await runGit(io, await sessionRoot(io), ['worktree', 'list', '--porcelain']).catch(() => null)
+  if (listed === null || listed.exitCode !== 0) return null
+  const trees = listed.stdout.split('\n\n').map(entry => ({
+    path: /^worktree (.+)$/m.exec(entry)?.[1] ?? '',
+    branch: /^branch refs\/heads\/(.+)$/m.exec(entry)?.[1] ?? null,
+  }))
+  const folder = (path: string) => path.slice(path.lastIndexOf('/') + 1)
+  const found =
+    trees.find(tree => folder(tree.path) === `agent-${agentId}`) ??
+    (name === null ? undefined : trees.find(tree => tree.branch === name || folder(tree.path) === name))
+
+  return found?.path || null
+}
+
 /** The person switched the transcript in view: the tree follows that subagent's work, or the main conversation's. */
-export const followView = async (io: Io, agentId: string | null): Promise<void> => {
+export const followView = async (io: Io, agentId: string | null, name: string | null = null): Promise<void> => {
   if ((await S.pick(io, 'agentView')) === agentId) return
+  if (agentId !== null && ((await S.pick(io, 'agents'))[agentId]?.root ?? null) === null) {
+    const root = await worktreeOf(io, agentId, name)
+    const main = await sessionRoot(io)
+    if (root !== null && root !== main) {
+      await io.set(state => ({
+        ...state,
+        agents: { ...state.agents, [agentId]: { root, isApart: true, activity: state.agents[agentId]?.activity ?? [] } },
+      }))
+    }
+  }
   const before = await viewRoot(io)
   await S.put(io, 'agentView', () => agentId)
   if ((await viewRoot(io)) !== before) {

@@ -31,7 +31,7 @@ const GIT: Record<string, { exitCode?: number; stdout: string }> = {
   'rev-parse --abbrev-ref --symbolic-full-name @{u}': { stdout: 'origin/feature/landing\n' },
   'rev-list --left-right --count HEAD...@{u}': { stdout: '2\t1\n' },
   'show --name-only --format= --no-renames HEAD': { stdout: 'app/Http/Landing.php\n' },
-  'log -n50 --format=%H%x1f%h%x1f%ar%x1f%s': { stdout: 'def1234567\x1fdef1234\x1f2 days ago\x1fAdd the landing\n' },
+  'log -n50 --format=%H%x1f%h%x1f%ar%x1f%an%x1f%s': { stdout: 'def1234567\x1fdef1234\x1f2 days ago\x1fAna Pop\x1fAdd the landing\n' },
   'rev-parse --verify --quiet def1234567^': { stdout: 'abc\n' },
   'diff --name-status -z -M abc def1234567': { stdout: 'A\0app/Landing.php\0' },
   'diff --numstat -z -M abc def1234567': { stdout: '5\t0\tapp/Landing.php\0' },
@@ -290,11 +290,11 @@ test('Prompt shows what changed since the last prompt, untracked files in', asyn
   expect(await ui.find({ type: 'Text', text: '✓ No changes since your last prompt' })).toBeDefined()
 })
 
-const TWO_COMMITS = 'aaa1111111\x1faaa1111\x1f1 hour ago\x1fFix the landing\nddd2222222\x1fddd2222\x1f2 days ago\x1fAdd the landing\n'
+const TWO_COMMITS = 'aaa1111111\x1faaa1111\x1f1 hour ago\x1fAna Pop\x1fFix the landing\nddd2222222\x1fddd2222\x1f2 days ago\x1fAna Pop\x1fAdd the landing\n'
 
 test('history puts the commits not pushed above those the upstream has', async ($, on) => {
   world(on)
-  answers['log -n50 --format=%H%x1f%h%x1f%ar%x1f%s'] = { stdout: TWO_COMMITS }
+  answers['log -n50 --format=%H%x1f%h%x1f%ar%x1f%an%x1f%s'] = { stdout: TWO_COMMITS }
   answers['rev-list --max-count=50 @{u}..HEAD'] = { stdout: 'aaa1111111\n' }
   await start($)
   const ui = await mountPane($)
@@ -309,7 +309,7 @@ test('with no upstream, history compares with every remote branch', async ($, on
   world(on)
   answers['rev-parse --abbrev-ref --symbolic-full-name @{u}'] = { exitCode: 128, stdout: '' }
   answers['remote'] = { stdout: 'origin\n' }
-  answers['log -n50 --format=%H%x1f%h%x1f%ar%x1f%s'] = { stdout: TWO_COMMITS }
+  answers['log -n50 --format=%H%x1f%h%x1f%ar%x1f%an%x1f%s'] = { stdout: TWO_COMMITS }
   answers['rev-list --max-count=50 HEAD --not --remotes'] = { stdout: 'aaa1111111\nddd2222222\n' }
   await start($)
   const ui = await mountPane($)
@@ -323,7 +323,7 @@ test('history shows a past commit, and Working changes comes back', async ($, on
   await start($)
   const ui = await $.ui.mount({ plugin: 'git-file-tree', surface: 'terminal', component: 'Pane', requestId: 'files', props: PANE_PROPS })
   await ui.press({ key: 'history' })
-  expect((await ui.find({ key: 'commit:def1234567' }))?.text).toMatch(/def1234 Add the landing {2}2 days ago/)
+  expect((await ui.find({ key: 'commit:def1234567' }))?.text).toMatch(/def1234 Add the landing {2}2 days ago · Ana Pop/)
   await ui.press({ key: 'commit:def1234567' })
   expect(await ui.find({ type: 'Text', text: 'def1234 Add the landing' })).toBeDefined()
   expect((await ui.find({ key: 'row:app/Landing.php' }))?.text).toMatch(/A Landing\.php \+5/)
@@ -554,5 +554,29 @@ test('viewing a subagent in a worktree reads git in that worktree', async ($, on
   expect((await ui.find({ key: 'row:src/cart.ts' }))?.text).toMatch(/●$/)
   expect(await ui.find({ key: 'row:app/Http/Landing.php' })).toBeUndefined()
   // Its own tree: the git operations act on the worktree.
+  expect(await ui.find({ key: 'stage-all' })).toBeDefined()
+})
+
+test('viewing a subagent the pane saw no file of finds its worktree by its name', async ($, on) => {
+  world(on)
+  const tree = '/repo/.claude/worktrees/agent-5009'
+  trees[tree] = {
+    'rev-parse --show-toplevel': `${tree}\n`,
+    'branch --show-current': '5009-retention\n',
+    'rev-parse --verify --quiet HEAD': 'abc\n',
+    'status --porcelain=v1 -z --untracked-files=all': ' M src/retention.ts\0',
+    'diff --numstat -z -M HEAD': '4\t0\tsrc/retention.ts\0',
+  }
+  answers['worktree list --porcelain'] = {
+    stdout: `worktree /repo\nHEAD 111\nbranch refs/heads/develop\n\nworktree ${tree}\nHEAD 222\nbranch refs/heads/5009-retention\n\n`,
+  }
+  on('agent.list', () => ({ value: [{ id: 'agent-9', name: '5009-retention', description: 'Issue 5009', type: 'general-purpose', status: 'running' as const }] }))
+  await start($)
+  const ui = await $.ui.mount({ plugin: 'git-file-tree', surface: 'terminal', component: 'Pane', requestId: 'files', props: PANE_PROPS })
+
+  await ui.redraw({ ...PANE_PROPS, view: { agentId: 'agent-9' } })
+  await clock.advance(300)
+  expect(await ui.find({ type: 'Text', text: '5009-retention' })).toBeDefined()
+  expect(await ui.find({ key: 'row:src/retention.ts' })).toBeDefined()
   expect(await ui.find({ key: 'stage-all' })).toBeDefined()
 })

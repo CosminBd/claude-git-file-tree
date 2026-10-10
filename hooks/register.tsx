@@ -21,6 +21,8 @@ export const register: Register = on => {
   let wanted: string | null = null
   /** The transcript the tree follows now, as the ticker last set it; undefined until the first tick syncs it. */
   let followed: string | null | undefined
+  /** The name the viewed agent is addressed by: a worktree named after it is its own. */
+  let wantedName: string | null = null
   /** The engine's closures, built once the session starts; every hook after it works through them. */
   let io: Io | null = null
 
@@ -64,7 +66,7 @@ export const register: Register = on => {
     $.clock.every(FOLLOW_MS, () => {
       if (wanted === followed) return
       followed = wanted
-      void A.followView(engine, wanted).catch(() => undefined)
+      void A.followView(engine, wanted, wantedName).catch(() => undefined)
     })
     $.clock.every(POLL_MS, () => {
       ticks += 1
@@ -152,8 +154,10 @@ export const register: Register = on => {
     const drawing: Io = { ...io, get: async () => ({ ...S.INITIAL, ...(await read($, ui)) }) }
     // A drawing may not write, nor anything it starts: the follow tick of session.start makes the switch.
     const viewed = e.props.view.agentId ?? null
-    wanted = viewed
     const agent = viewed === null ? null : (await $.agent.list().catch(() => [])).find(info => info.id === viewed)
+    // Both at once, so the tick never follows the agent without its name.
+    wantedName = agent?.name ?? null
+    wanted = viewed
 
     return renderPane({ io: drawing, t: $.ui.resolve(e), e, agentLabel: agent?.description ?? agent?.name ?? null })
   })

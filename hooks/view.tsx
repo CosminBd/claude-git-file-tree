@@ -432,7 +432,7 @@ const renderTree = async (c: Ctx): Promise<RenderElement> => {
   let empty: RenderElement | null = null
   if (rows.length === 0 && stagedRows.length === 0) {
     empty = shared !== null && !isFiltering && !isCommit ? (
-      <Text dimColor>This agent has not read or changed a file yet.</Text>
+      <Text dimColor>The pane has seen no file that this agent read or changed.</Text>
     ) : isFiltering ? (
       <Text dimColor>No file matches “{filter}”.</Text>
     ) : isAll ? (
@@ -729,7 +729,7 @@ const commitRow = (c: Ctx, commit: CommitInfo, shown: CommitInfo | null) => {
     <Button key={`commit:${commit.sha}`} plain {...(isShown ? { autoFocus: true as const } : {})} onPress={() => A.showCommit(c.io, commit)}>
       <Text dimColor>{`${commit.short} `}</Text>
       {isShown ? <Text bold>{commit.subject}</Text> : commit.subject}
-      <Text dimColor>{`  ${commit.when}`}</Text>
+      <Text dimColor>{`  ${commit.when} · ${commit.author}`}</Text>
     </Button>
   )
 }

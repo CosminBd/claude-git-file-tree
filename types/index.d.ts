@@ -38,6 +38,8 @@ export type CommitInfo = {
   subject: string
   /** `2 days ago`. */
   when: string
+  /** The author's name. */
+  author: string
   /** Whether a remote has it: its upstream's branch, or any remote branch. Absent with no remote. */
   isPushed?: boolean
 }

@@ -44,8 +44,8 @@ describe('git output', () => {
     expect(counts.has('total')).toBe(false)
   })
 
-  test('log lines: hash, short hash, age, subject', () => {
-    expect(parseLog('aaa\x1fa\x1f1 hour ago\x1fFix: x\nbad line\n')).toEqual([{ sha: 'aaa', short: 'a', when: '1 hour ago', subject: 'Fix: x' }])
+  test('log lines: hash, short hash, age, author, subject', () => {
+    expect(parseLog('aaa\x1fa\x1f1 hour ago\x1fAna Pop\x1fFix: x\nbad line\n')).toEqual([{ sha: 'aaa', short: 'a', when: '1 hour ago', author: 'Ana Pop', subject: 'Fix: x' }])
   })
 
   test('a diff keeps its hunks only', () => {

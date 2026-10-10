@@ -191,13 +191,13 @@ const applyStats = (files: ChangedFile[], stats: ReadonlyMap<string, NumStat>): 
   }
 }
 
-/** Parses `git log --format=%H%x1f%h%x1f%ar%x1f%s`. */
+/** Parses `git log --format=%H%x1f%h%x1f%ar%x1f%an%x1f%s`. */
 export const parseLog = (stdout: string): CommitInfo[] =>
   stdout
     .split('\n')
     .map(line => line.split('\x1f'))
-    .filter(parts => parts.length >= 4 && parts[0] !== '')
-    .map(([sha = '', short = '', when = '', ...subject]) => ({ sha, short, when, subject: subject.join('\x1f') }))
+    .filter(parts => parts.length >= 5 && parts[0] !== '')
+    .map(([sha = '', short = '', when = '', author = '', ...subject]) => ({ sha, short, when, author, subject: subject.join('\x1f') }))
 
 /**
  * The commits of HEAD that are not pushed: those its upstream lacks, or with no upstream those
@@ -215,7 +215,7 @@ const unpushedShas = async (git: Git, root: string, count: number): Promise<Set<
 
 /** The latest commits of the current branch, newest first, each marked pushed or not where a remote says. */
 export const listCommits = async (git: Git, root: string, count = 50): Promise<CommitInfo[]> => {
-  const commits = parseLog((await git(['log', `-n${count}`, '--format=%H%x1f%h%x1f%ar%x1f%s'], root)).stdout)
+  const commits = parseLog((await git(['log', `-n${count}`, '--format=%H%x1f%h%x1f%ar%x1f%an%x1f%s'], root)).stdout)
   const unpushed = await unpushedShas(git, root, count)
 
   return unpushed === null ? commits : commits.map(commit => ({ ...commit, isPushed: !unpushed.has(commit.sha) }))

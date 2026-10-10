@@ -85,6 +85,8 @@ When you view the transcript of a subagent, the pane shows the work of that suba
 - If the subagent works in your folder, the tree shows only the files that the subagent read or changed. The git operations are not available. To use them, go back to the main conversation.
 - If the subagent works in its own git worktree, the tree shows the changes in that worktree. The git operations operate on the worktree.
 
+The pane finds the worktree of a subagent from the files that the subagent reads or changes. If the pane did not see these files, it looks in `git worktree list`. It uses the worktree in the folder `agent-<id>`, or the worktree whose branch or folder has the name of the subagent.
+
 ## Examine a file
 
 Click a file to open it. A changed file opens on its diff.
@@ -164,7 +166,7 @@ The line below the buttons shows the result of the last operation. If an operati
 
 ## History
 
-Push `h` to show the last 50 commits of the current branch. The commits that are not pushed show first.
+Push `h` to show the last 50 commits of the current branch. Each commit shows its age and its author. The commits that are not pushed show first.
 
 ![The history: the commits that are not pushed, then the commits on origin/main](docs/screenshots/history.png)
 
