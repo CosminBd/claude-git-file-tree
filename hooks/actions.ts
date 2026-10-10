@@ -25,6 +25,8 @@ export type Io = S.StateIo & {
   storeGet: (key: string) => Promise<unknown>
   storeSet: (key: string, value: unknown) => Promise<void>
   cwd: () => Promise<string>
+  /** Claude Code's theme setting, `dark` when it cannot be read. */
+  theme: () => Promise<string>
   scroll: (args: UiScrollArgs) => Promise<unknown>
   focus: (args: UiFocusArgs) => Promise<unknown>
   open: (args: PaneOpenArgs) => Promise<{ isPlaced: boolean }>
@@ -51,6 +53,7 @@ const previewDeps = (io: Io): PreviewDeps => ({
     }
   },
   readText: path => io.readText(path),
+  theme: () => io.theme(),
   pngSize: async path => {
     try {
       return pngDimensions((await io.readBase64(path)).slice(0, 32))

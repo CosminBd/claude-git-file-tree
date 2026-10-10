@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { hunksOnly, parseLineCounts, parseLog, parseNameStatus, parseNumstat, parseStatus } from '../hooks/git'
-import { defaultMode, diffPages, modesFor, pageRanges, sectionsOf, splitHunk } from '../hooks/preview'
+import { defaultMode, diffPages, modesFor, pageRanges, splitHunk } from '../hooks/preview'
 import { buildTree, flatten, matches, reviewOrder } from '../hooks/tree'
 
 describe('git output', () => {
@@ -128,43 +128,5 @@ describe('tree', () => {
 
   test('review order follows the tree', () => {
     expect(reviewOrder(files)).toEqual(['app/Http/Controllers/Landing.php', 'app/Models/User.php', 'README.md'])
-  })
-})
-
-describe('single-file components', () => {
-  const VUE = [
-    '<script setup lang="ts">',
-    "import { ref } from 'vue'",
-    '</script>',
-    '',
-    '<template>',
-    '  <template v-if="open"><p>{{ label }}</p></template>',
-    '</template>',
-    '',
-    '<style lang="scss" scoped>',
-    '.a { .b { color: red; } }',
-    '</style>',
-  ]
-
-  test('each block draws in the language of its lang, the tags and the template as HTML', () => {
-    expect(sectionsOf('src/Badge.vue', VUE)).toEqual([
-      { line: 1, language: 'html' },
-      { line: 2, language: 'typescript' },
-      { line: 3, language: 'html' },
-      { line: 10, language: 'scss' },
-      { line: 11, language: 'html' },
-    ])
-  })
-
-  test('a block without lang takes the default, and one on a single line stays HTML', () => {
-    expect(sectionsOf('Card.svelte', ['<script>', 'let n = 1', '</script>', '<style>p { margin: 0 }</style>', '<p>{n}</p>'])).toEqual([
-      { line: 1, language: 'html' },
-      { line: 2, language: 'javascript' },
-      { line: 3, language: 'html' },
-    ])
-  })
-
-  test('other files have no blocks', () => {
-    expect(sectionsOf('src/cart.ts', ['const a = 1'])).toBeUndefined()
   })
 })

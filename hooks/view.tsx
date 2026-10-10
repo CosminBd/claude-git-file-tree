@@ -1,6 +1,6 @@
 import type { ElementTable, RenderElement, RenderInput } from 'claude-code'
 
-import type { Activity, ActivityKind, AgentWork, ChangedFile, CodeSection, CommitInfo, FileStatus, PreviewMode, Snapshot } from '../types'
+import type { Activity, ActivityKind, AgentWork, ChangedFile, ColoredSpan, CommitInfo, FileStatus, PreviewMode, Snapshot } from '../types'
 import * as A from './actions'
 import type { Io } from './actions'
 import { displayWidth, layoutTable, parseBlocks } from './markdown'
@@ -621,13 +621,13 @@ const renderPreview = async (c: Ctx): Promise<RenderElement> => {
   let content: RenderElement
   switch (shown.kind) {
     case 'diff':
-      content = shown.sections
-        ? sectionedDiff(c, shown.text, shown.sections)
+      content = shown.colored
+        ? coloredDiff(c, shown.text, shown.colored)
         : <Code source={shown.text} format="diff" path={shown.path} />
       break
     case 'code':
-      content = shown.sections
-        ? sectionedSource(c, shown.text, shown.firstLine ?? 1, shown.sections)
+      content = shown.colored
+        ? coloredSource(c, shown.colored, shown.firstLine ?? 1)
         : <Code source={shown.text} path={shown.path} startLine={shown.firstLine ?? 1} />
       break
     case 'markdown':
@@ -724,54 +724,28 @@ const renderPreview = async (c: Ctx): Promise<RenderElement> => {
   )
 }
 
-const languageAt = (sections: CodeSection[], line: number): string => sections.findLast(section => section.line <= line)?.language ?? 'html'
+/** A line's colored runs as Text; an empty line keeps its row. */
+const spansOf = (c: Ctx, spans: ColoredSpan[]) => {
+  const { Text } = c.t
+  if (spans.every(([text]) => text === '')) return ' '
 
-/** A page of a single-file component: one Code per run of lines in one language, numbered on from the page's first. */
-const sectionedSource = (c: Ctx, text: string, firstLine: number, sections: CodeSection[]) => {
-  const { Box, Code } = c.t
-  const runs: { line: number; language: string; lines: string[] }[] = []
-  text.split('\n').forEach((source, i) => {
-    const language = languageAt(sections, firstLine + i)
-    const run = runs.at(-1)
-    if (run?.language === language) run.lines.push(source)
-    else runs.push({ line: firstLine + i, language, lines: [source] })
-  })
-
-  // Each Code sizes its gutter to its own last number: indent the narrower ones, so the numbers line up.
-  const digits = (line: number) => String(line).length
-  const widest = digits(firstLine + text.split('\n').length - 1)
-
-  return (
-    <Box flexDirection="column">
-      {runs.map(run => (
-        <Box key={`run:${run.line}`} paddingLeft={widest - digits(run.line + run.lines.length - 1)}>
-          <Code source={run.lines.join('\n')} language={run.language} startLine={run.line} />
-        </Box>
-      ))}
-    </Box>
-  )
+  return spans.map(([text, color], i) => (color === null ? text : <Text key={`s${i}`} color={color}>{text}</Text>))
 }
 
-/** A single-file component's diff: each hunk in the language of the block its first change is in. */
-const sectionedDiff = (c: Ctx, text: string, sections: CodeSection[]) => {
-  const { Box, Code, Text } = c.t
-  const hunks = text.split(/\n(?=@@ )/)
-  // As for the source: each hunk's gutter fits its own numbers, so the narrower ones are indented.
-  const digits = hunks.map(hunk => {
-    const [, older = 0, olderCount = 1, newer = 0, newerCount = 1] = (/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))?/.exec(hunk) ?? []).map(group => (group === undefined ? undefined : Number(group)))
-
-    return String(Math.max(older + olderCount - 1, newer + newerCount - 1, 1)).length
-  })
-  const widest = Math.max(...digits)
+/** A page the pane's own highlighter colored, laid out as Code lays out source: numbered, a long line wrapped beside its number. */
+const coloredSource = (c: Ctx, colored: (ColoredSpan[] | null)[], firstLine: number) => {
+  const { Box, Text } = c.t
+  const widest = String(firstLine + colored.length - 1).length
 
   return (
     <Box flexDirection="column">
-      {hunks.map((hunk, i) => (
-        <Box key={`hunk:${i}`} flexDirection="column">
-          {/* The gap between hunks, as one Code draws it. */}
-          {i > 0 ? <Text dimColor>...</Text> : null}
-          <Box paddingLeft={widest - (digits[i] ?? widest)}>
-            <Code source={hunk} format="diff" language={languageAt(sections, firstChangeLine(hunk))} />
+      {colored.map((spans, i) => (
+        <Box key={`line:${firstLine + i}`} flexDirection="row">
+          <Box flexShrink={0}>
+            <Text color="inactive">{` ${String(firstLine + i).padStart(widest)} `}</Text>
+          </Box>
+          <Box flexGrow={1} flexShrink={1}>
+            <Text>{spansOf(c, spans ?? [])}</Text>
           </Box>
         </Box>
       ))}
@@ -779,18 +753,51 @@ const sectionedDiff = (c: Ctx, text: string, sections: CodeSection[]) => {
   )
 }
 
-/** The line of a hunk's first change: on the new side, or the old one for a file the change deletes. */
-const firstChangeLine = (hunk: string): number => {
-  const header = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(hunk)
-  let older = Number(header?.[1] ?? 1)
-  let newer = Number(header?.[2] ?? 1)
-  for (const line of hunk.split('\n').slice(1)) {
-    if (line.startsWith('+') || line.startsWith('-')) return newer > 0 ? newer : older
-    older += 1
-    newer += 1
+/** A diff the pane's own highlighter colored, laid out as Code draws a diff: `...` between hunks, the changed lines on red and green. */
+const coloredDiff = (c: Ctx, text: string, colored: (ColoredSpan[] | null)[]) => {
+  const { Box, Text } = c.t
+  const lines = text.split('\n')
+  const rows: RenderElement[] = []
+  let oldLine = 1
+  let newLine = 1
+  let widest = 1
+  for (const line of lines) {
+    const header = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))?/.exec(line)
+    if (header) widest = Math.max(widest, String(Number(header[1]) + Number(header[2] ?? 1)).length, String(Number(header[3]) + Number(header[4] ?? 1)).length)
   }
+  lines.forEach((line, i) => {
+    const header = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(line)
+    if (header) {
+      oldLine = Number(header[1])
+      newLine = Number(header[2])
+      if (rows.length > 0) rows.push(<Text key={`gap:${i}`} dimColor>...</Text>)
 
-  return newer
+      return
+    }
+    if (line.startsWith('\\')) return
+    const sign = line[0] === '-' || line[0] === '+' ? line[0] : ' '
+    const number = sign === '-' ? oldLine : newLine
+    if (sign !== '+') oldLine += 1
+    if (sign !== '-') newLine += 1
+    const background = sign === '-' ? 'diffRemoved' : sign === '+' ? 'diffAdded' : undefined
+    const gutter = ` ${String(number).padStart(widest)} ${sign}`
+    rows.push(
+      <Box key={`line:${i}`} flexDirection="row">
+        <Box flexShrink={0}>
+          {background === undefined
+            ? <Text dimColor>{gutter}</Text>
+            : <Text color={sign === '-' ? 'error' : 'success'} backgroundColor={background}>{gutter}</Text>}
+        </Box>
+        <Box flexGrow={1} flexShrink={1}>
+          {background === undefined
+            ? <Text>{spansOf(c, colored[i] ?? [])}</Text>
+            : <Text backgroundColor={background}>{spansOf(c, colored[i] ?? [])}</Text>}
+        </Box>
+      </Box>,
+    )
+  })
+
+  return <Box flexDirection="column">{rows}</Box>
 }
 
 /** One commit of the history, bold while the tree shows it. */

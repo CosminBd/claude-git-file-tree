@@ -16,7 +16,7 @@ The pane shows:
 
 - The changed files, with a letter and a color for each type of change.
 - The diff of each file.
-- The source of each file, with syntax highlighting. In Vue and Svelte files, each block has the highlighting of its language: TypeScript or JavaScript, HTML, CSS or SCSS.
+- The source of each file, with syntax highlighting. Vue and Svelte files use the same grammars as VS Code (a copy of [Shiki](https://shiki.style) in the mod), so the template, the script and the styles all have colors, in the source and in the diff.
 - Markdown files, rendered. The pane has a built-in Markdown viewer.
 - The commit history of the current branch.
 - The git operations for the current branch: stage, commit, push, and create a PR.
@@ -196,6 +196,8 @@ claude plugin test .
 claude --plugin-dir .
 ```
 
+`hooks/vendor/shiki.js` is a build of Shiki with only the Vue and Svelte grammars and two themes. To make it again, run `scripts/shiki/build.sh`.
+
 ## License
 
-MIT
+MIT. The Shiki build in `hooks/vendor` is MIT too: see `hooks/vendor/shiki.LICENSE`.

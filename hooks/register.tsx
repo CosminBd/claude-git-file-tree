@@ -39,6 +39,11 @@ export const register: Register = on => {
       storeGet: key => $.store.get(key),
       storeSet: (key, value) => $.store.set(key, value),
       cwd: () => $.session.cwd(),
+      theme: async () => {
+        const row = (await $.config.list().catch(() => [])).find(entry => entry.key === 'theme')
+
+        return typeof row?.value === 'string' ? row.value : 'dark'
+      },
       scroll: args => $.ui.scroll(args),
       focus: args => $.ui.focus(args),
       open: args => $.ui.open(args),

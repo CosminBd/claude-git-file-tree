@@ -1,6 +1,7 @@
-import type { ChangedFile, CodeSection, Preview, PreviewMode, Snapshot } from '../types'
+import type { ChangedFile, Preview, PreviewMode, Snapshot } from '../types'
 import { baseContent, contentAt, extensionOf, fileDiff, looksBinary } from './git'
 import type { Git } from './git'
+import { colorDiff, colorPage, shikiLanguageOf } from './highlight'
 import { blockPageRanges } from './markdown'
 
 /** Characters one page draws: a drawing holds 100,000, and the header needs a little. */
@@ -17,59 +18,23 @@ export type PreviewDeps = {
   readText: (absolutePath: string) => Promise<string>
   /** A PNG's pixel size, or null when it is not one. */
   pngSize: (absolutePath: string) => Promise<{ width: number; height: number } | null>
+  /** Claude Code's theme setting (`dark`, `light`, ...): the colors the pane's own highlighter picks. */
+  theme: () => Promise<string>
 }
 
 export const isMarkdown = (path: string): boolean => ['md', 'markdown', 'mdx'].includes(extensionOf(path))
 
-/** The highlighter has no grammar for these: each block draws in its own language instead. */
-const COMPONENT_EXTENSIONS = new Set(['vue', 'svelte'])
+/** The file on each side of its diff: null where it is missing (new, deleted) or cannot be read. */
+const diffSides = async (deps: PreviewDeps, snapshot: Snapshot, file: ChangedFile | undefined, path: string) => {
+  const isNew = file?.status === 'untracked' || file?.status === 'added' || snapshot.baseRev === ''
+  const before = isNew ? null : await contentAt(deps.git, snapshot.root, snapshot.baseRev, file?.from ?? path).catch(() => null)
+  const end = snapshot.commit?.sha ?? snapshot.toRev
+  const after =
+    file?.status === 'deleted' ? null
+    : end !== undefined ? await contentAt(deps.git, snapshot.root, end, path).catch(() => null)
+    : await deps.readText(`${snapshot.root}/${path}`).catch(() => null)
 
-/** A block's language by its `lang` attribute; '' is a block without one. */
-const BLOCK_LANGUAGES: Record<string, Record<string, string>> = {
-  script: { '': 'javascript', js: 'javascript', ts: 'typescript', jsx: 'jsx', tsx: 'tsx' },
-  style: { '': 'css', postcss: 'css', scss: 'scss', sass: 'sass', less: 'less', styl: 'stylus' },
-  template: { '': 'html' },
-  i18n: { '': 'json', yml: 'yaml' },
-}
-
-/**
- * The blocks of a single-file component, each in its own language: a `<script lang="ts">` body as TypeScript, a
- * `<style lang="scss">` body as SCSS, the template and the block tags as HTML. Undefined for any other file. A block
- * opens and closes at the start of a line, as these files write them.
- */
-export const sectionsOf = (path: string, lines: string[]): CodeSection[] | undefined => {
-  if (!COMPONENT_EXTENSIONS.has(extensionOf(path))) return undefined
-  const sections: CodeSection[] = []
-  const add = (line: number, language: string) => {
-    if (sections.at(-1)?.language !== language) sections.push({ line, language })
-  }
-  let open: { name: string; language: string } | null = null
-  lines.forEach((text, i) => {
-    if (open !== null) {
-      const closes = new RegExp(`^</${open.name}\\s*>`, 'i').test(text)
-      add(i + 1, closes ? 'html' : open.language)
-      if (closes) open = null
-
-      return
-    }
-    add(i + 1, 'html')
-    const tag = /^<([a-z][\w-]*)\b([^>]*)>/i.exec(text)
-    const name = tag?.[1]?.toLowerCase() ?? ''
-    const languages = BLOCK_LANGUAGES[name]
-    if (tag === null || languages === undefined || new RegExp(`</${name}\\s*>`, 'i').test(text)) return
-    const lang = /\blang=["']?([\w-]+)/i.exec(tag[2] ?? '')?.[1]?.toLowerCase() ?? ''
-    open = { name, language: languages[lang] ?? (lang || languages[''] || 'html') }
-  })
-
-  return sections
-}
-
-/** The file as the diff's new side has it: the commit's, the deleted file's last, else the one on disk. */
-const diffSideText = async (deps: PreviewDeps, snapshot: Snapshot, file: ChangedFile | undefined, path: string): Promise<string | null> => {
-  if (snapshot.commit !== undefined) return contentAt(deps.git, snapshot.root, snapshot.commit.sha, path)
-  if (file?.status === 'deleted') return baseContent(deps.git, snapshot, path)
-
-  return deps.readText(`${snapshot.root}/${path}`)
+  return { before, after }
 }
 
 /** The modes a file offers, in toolbar order. */
@@ -186,10 +151,14 @@ export const loadPreview = async (
     if (diff === '') return note(file?.status === 'renamed' ? `Renamed from ${file.from ?? '?'}, content unchanged.` : 'No line changes (mode or whitespace only).')
     const pages = diffPages(diff)
     const at = clampPage(page, pages.length)
-    const sideText = COMPONENT_EXTENSIONS.has(extensionOf(path)) ? await diffSideText(deps, snapshot, file, path).catch(() => null) : null
-    const sections = sideText === null ? undefined : sectionsOf(path, sideText.replace(/\n$/, '').split('\n'))
+    const text = pages[at] ?? ''
+    const shown = { ...base, kind: 'diff' as const, text, page: at, pages: pages.length }
+    const language = shikiLanguageOf(path)
+    if (language === null) return shown
+    const { before, after } = await diffSides(deps, snapshot, file, path)
+    const colored = colorDiff(text, language, await deps.theme(), before, after)
 
-    return { ...base, kind: 'diff', text: pages[at] ?? '', page: at, pages: pages.length, ...(sections ? { sections } : {}) }
+    return colored ? { ...shown, colored } : shown
   }
 
   const absolute = `${snapshot.root}/${path}`
@@ -226,7 +195,8 @@ export const loadPreview = async (
   const ranges = shownMode === 'rendered' ? blockPageRanges(lines, MARKDOWN_PAGE_CHARS) : pageRanges(lines)
   const at = clampPage(page, ranges.length)
   const [start, end] = ranges[at] ?? [0, lines.length]
-  const sections = shownMode === 'rendered' ? undefined : sectionsOf(path, lines)
+  const language = shownMode === 'rendered' ? null : shikiLanguageOf(path)
+  const colored = language === null ? undefined : colorPage(text, language, await deps.theme(), start, end)
 
   return {
     ...base,
@@ -236,7 +206,7 @@ export const loadPreview = async (
     pages: ranges.length,
     firstLine: start + 1,
     totalLines: lines.length,
-    ...(sections ? { sections } : {}),
+    ...(colored ? { colored } : {}),
   }
 }
 

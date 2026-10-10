@@ -108,8 +108,8 @@ export type PreviewMode = 'diff' | 'source' | 'rendered'
 
 export type PreviewImage = { file: string; width: number; height: number }
 
-/** Where a block of a single-file component (.vue, .svelte) starts, 1-based, and the language it draws in. */
-export type CodeSection = { line: number; language: string }
+/** A run of text in one color (`#f92672`), null for the text's own color. */
+export type ColoredSpan = [text: string, color: string | null]
 
 export type Preview = {
   path: string
@@ -123,8 +123,8 @@ export type Preview = {
   /** The 1-based line the page starts at, for a source page. */
   firstLine?: number
   totalLines?: number
-  /** A single-file component's blocks, over the whole file: each draws in its own language. */
-  sections?: CodeSection[]
+  /** The page colored by the pane's own highlighter (Shiki), one entry per line of `text`; null for a hunk header. */
+  colored?: (ColoredSpan[] | null)[]
   note?: string
   image?: PreviewImage
 }
