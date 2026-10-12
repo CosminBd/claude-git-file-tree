@@ -2,7 +2,7 @@ import type { BaseMode, GitUi, UiState, View } from '../types'
 
 export const PANE = 'files'
 
-export const GIT_INITIAL: GitUi = { busy: null, notice: null, confirm: null, message: '', amend: false, hasGh: null, pr: null, base: null }
+export const GIT_INITIAL: GitUi = { busy: null, notice: null, confirm: null, message: '', amend: false, hasGh: null, pr: null, web: null, base: null }
 
 export const INITIAL: UiState = {
   snapshot: null,
@@ -16,7 +16,6 @@ export const INITIAL: UiState = {
   commit: null,
   log: null,
   git: GIT_INITIAL,
-  prForm: null,
   preview: null,
   touched: null,
   activity: [],

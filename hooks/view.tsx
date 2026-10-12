@@ -287,7 +287,7 @@ const syncRow = async (c: Ctx, snap: Snapshot): Promise<RenderElement> => {
   const hasUpstream = snap.upstream !== undefined
   const isDetached = snap.branch === 'HEAD' || snap.branch === ''
   const isDiverged = ahead > 0 && behind > 0
-  const canPr = git.hasGh === true && git.pr === null && !isDetached && snap.branch !== (git.base ?? 'main')
+  const canPr = Boolean(git.web) && git.pr === null && !isDetached && snap.branch !== (git.base ?? 'main')
   const blocker = pushBlocker(snap, isDetached, isDiverged)
 
   return (
@@ -304,7 +304,7 @@ const syncRow = async (c: Ctx, snap: Snapshot): Promise<RenderElement> => {
       {git.pr !== null ? (
         <Button key="pr-open" plain onPress={() => A.openUrl(c.io, git.pr?.url ?? '')}>{prLabel(git.pr)}</Button>
       ) : canPr ? (
-        <Button key="pr-create" plain onPress={() => A.openPrForm(c.io)}>Create PR</Button>
+        <Button key="pr-create" plain onPress={() => A.openPrPage(c.io)}>Create PR ↗</Button>
       ) : null}
     </Box>
   )
@@ -879,55 +879,10 @@ const renderLog = async (c: Ctx): Promise<RenderElement> => {
   )
 }
 
-/** The PR form: a title, the base branch, draft or not, and the description from the template. */
-const renderPr = async (c: Ctx): Promise<RenderElement> => {
-  const table = c.t
-  const { Box, Text, Button } = table
-  const form = await S.pick(c.io, 'prForm')
-  const snap = await S.pick(c.io, 'snapshot')
-  if (form === null || !('Input' in table)) return renderTree(c)
-  const { Input } = table
-  const bodyColumns = c.e.component === 'Pane' ? c.e.props.bodyColumns : 60
-  const back = () => c.io.set(state => ({ ...state, screen: 'tree', prForm: null }))
-
-  return (
-    <Box flexDirection="column">
-      <Button key="back" plain hotkey="b" onPress={back}>‹ Back</Button>
-      <Box flexWrap="wrap" marginTop={1}>
-        <Text bold>Create PR</Text>
-        <Text dimColor>{` ${snap?.branch ?? ''} → ${form.base}`}</Text>
-      </Box>
-      <Box flexDirection="column" marginTop={1}>
-        <Input key="pr-title" label="Title" value={form.title} autoFocus onInput={value => A.editPrForm(c.io, f => ({ ...f, title: value }))} onSubmit={() => A.createPr(c.io)} submitLabel="create" />
-        <Input key="pr-base" label="Base" value={form.base} onInput={value => A.editPrForm(c.io, f => ({ ...f, base: value }))} onSubmit={() => A.createPr(c.io)} submitLabel="create" />
-      </Box>
-      <Box flexWrap="wrap" columnGap={2}>
-        <Button key="pr-draft" plain onPress={() => A.editPrForm(c.io, f => ({ ...f, draft: !f.draft }))}>{form.draft ? '[x] Draft' : '[ ] Draft'}</Button>
-        <Button key="pr-edit" plain hotkey="e" onPress={() => A.editPrBody(c.io)}>Edit description</Button>
-        <Button key="pr-submit" plain onPress={() => A.createPr(c.io)}>{form.draft ? 'Create draft PR' : 'Create PR'}</Button>
-      </Box>
-      {form.templates.length > 1 ? (
-        <Box flexWrap="wrap" columnGap={2}>
-          <Text dimColor>Template</Text>
-          {...form.templates.map(template => (
-            <Button key={`pr-template:${template}`} plain onPress={() => A.chooseTemplate(c.io, template)}>
-              {template === form.template ? <Text bold>{basename(template)}</Text> : basename(template)}
-            </Button>
-          ))}
-        </Box>
-      ) : null}
-      {await statusLine(c)}
-      <Box flexDirection="column" marginTop={1}>
-        {form.body.trim() === '' ? <Text dimColor>No description. Push e to write one.</Text> : renderMarkdown(c, form.body, Math.max(20, bodyColumns - 1))}
-      </Box>
-    </Box>
-  )
-}
-
 export const renderPane = async (c: Ctx): Promise<RenderElement> => {
   const screen = await S.pick(c.io, 'screen')
 
-  return screen === 'preview' ? renderPreview(c) : screen === 'log' ? renderLog(c) : screen === 'pr' ? renderPr(c) : renderTree(c)
+  return screen === 'preview' ? renderPreview(c) : screen === 'log' ? renderLog(c) : renderTree(c)
 }
 
 /**

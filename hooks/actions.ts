@@ -1,13 +1,13 @@
 import type { PaneOpenArgs, RenderSurface, UiFocusArgs, UiScrollArgs } from 'claude-code'
 
-import type { ActivityKind, BaseMode, ChangedFile, CommitInfo, GitUi, PrForm, Preview, PreviewMode, Snapshot } from '../types'
+import type { ActivityKind, BaseMode, ChangedFile, CommitInfo, GitUi, Preview, PreviewMode, Snapshot } from '../types'
 import { ancestors, isCommit, mergeActivity, pathsIn, toRelative } from './activity'
 import { defaultBranch, EMPTY_TREE, listAll, listCommits, listTree, scan } from './git'
 import type { Git, RunResult } from './git'
 import { defaultMode, loadPreview, modesFor, pngDimensions } from './preview'
 import type { PreviewDeps } from './preview'
 import * as S from './state'
-import { cleanMessage, CONFIRM_MS, discardCommands, findTemplates, messagePrompt, outcomeOf, parsePrView, pathsOf } from './ops'
+import { cleanMessage, compareUrl, CONFIRM_MS, discardCommands, messagePrompt, outcomeOf, parsePrView, pathsOf, webUrlOf } from './ops'
 import type { Outcome } from './ops'
 import { reviewOrder } from './tree'
 import { mentionOf, pick } from './mention'
@@ -192,8 +192,6 @@ const refreshOnce = async (io: Io, forcePreview: string | null): Promise<void> =
     if (list !== null && !sameJson(await S.pick(io, 'allFiles'), list)) await S.put(io, 'allFiles', () => list)
   }
 
-  await reloadPrBody(io)
-
   // Keep an open preview current with what is on disk now.
   const shown = await S.pick(io, 'preview')
   const isPreviewing = (await S.pick(io, 'screen')) === 'preview'
@@ -347,8 +345,7 @@ export const followView = async (io: Io, agentId: string | null, name: string | 
       commit: null,
       log: null,
       allFiles: null,
-      prForm: null,
-      git: { ...S.GIT_INITIAL, hasGh: state.git.hasGh },
+      git: { ...S.GIT_INITIAL, hasGh: state.git.hasGh, web: state.git.web },
     }))
   }
   await refresh(io)
@@ -594,8 +591,7 @@ export const commit = async (io: Io, thenPush = false): Promise<void> => {
 const pushArgs = async (io: Io, root: string, force: boolean): Promise<string[] | Outcome> => {
   const snap = await S.pick(io, 'snapshot')
   if (snap?.upstream !== undefined) return force ? ['push', '--force-with-lease', '--force-if-includes'] : ['push']
-  const remotes = (await runGit(io, root, ['remote'])).stdout.split('\n').map(r => r.trim()).filter(Boolean)
-  const remote = remotes.includes('origin') ? 'origin' : remotes[0]
+  const remote = await remoteOf(io, root)
   if (remote === undefined) return { ok: false, text: 'This repository has no remote to push to.' }
 
   return ['push', '-u', remote, 'HEAD']
@@ -631,14 +627,32 @@ export const undoCommit = async (io: Io): Promise<void> => {
 
 // Pull requests -------------------------------------------------------------------------
 
-/** Asks once whether `gh` is there and signed in, and which branch PRs go to. */
+/** The remote a branch without an upstream pushes to: origin, else the first. */
+const remoteOf = async (io: Io, root: string): Promise<string | undefined> => {
+  const remotes = (await runGit(io, root, ['remote'])).stdout.split('\n').map(r => r.trim()).filter(Boolean)
+
+  return remotes.includes('origin') ? 'origin' : remotes[0]
+}
+
+/** Asks once whether `gh` is there and signed in, where the repository's web page is, and which branch PRs go to. */
 export const checkGh = async (io: Io): Promise<void> => {
   const known = await S.pick(io, 'git')
-  if (known.hasGh !== null) return
+  // A pane state from before `web` existed lacks it: ask again.
+  if (known.hasGh !== null && known.web !== undefined) return
   const root = await rootOf(io)
   const auth = await io.run(['gh', 'auth', 'status'], root, { timeoutMs: 15_000 }).catch(() => null)
+  const hasGh = auth !== null && auth.exitCode === 0
+  const remote = await remoteOf(io, root)
+  const fetchUrl = remote === undefined ? '' : (await runGit(io, root, ['remote', 'get-url', remote])).stdout
+  const web = webUrlOf(fetchUrl)
   const target = await defaultBranch(gitOf(io), root).catch(() => null)
-  await putGit(io, git => ({ ...git, hasGh: auth !== null && auth.exitCode === 0, base: target === null ? null : target.replace(/^origin\//, '') }))
+  await putGit(io, git => ({
+    ...git,
+    hasGh,
+    // A GitHub Enterprise host is GitHub only when gh says so (refreshPr drops it otherwise).
+    web: web !== null && (web.startsWith('https://github.com/') || hasGh) ? web : null,
+    base: target === null ? null : target.replace(/^origin\//, ''),
+  }))
   await refreshPr(io)
 }
 
@@ -649,64 +663,17 @@ export const refreshPr = async (io: Io): Promise<void> => {
   const pr = view !== null && view.exitCode === 0 ? parsePrView(view.stdout) : null
   // gh answers this when no remote is on GitHub: no PR can be made here.
   const isGithub = view === null || !/none of the git remotes/i.test(view.stderr)
-  await putGit(io, git => ({ ...git, pr, hasGh: isGithub }))
+  await putGit(io, git => ({ ...git, pr, hasGh: isGithub, web: isGithub ? git.web : null }))
 }
 
-/** Opens the PR form: title from the last commit, the description from the repository's template. */
-export const openPrForm = async (io: Io): Promise<void> => {
-  const root = await rootOf(io)
-  const gitDir = (await runGit(io, root, ['rev-parse', '--absolute-git-dir'])).stdout.trim()
-  const templates = findTemplates(await listAll(gitOf(io), root).catch(() => []))
-  const template = templates[0] ?? null
-  const body = template === null ? '' : await io.readText(`${root}/${template}`).catch(() => '')
-  const bodyFile = `${gitDir}/PR_EDITMSG.md`
-  await io.writeText(bodyFile, body)
-  const title = (await runGit(io, root, ['log', '-1', '--format=%s'])).stdout.trim()
-  const base = (await S.pick(io, 'git')).base ?? 'main'
-  await io.set(state => ({
-    ...state,
-    screen: 'pr',
-    prForm: { title, base, draft: false, templates, template, bodyFile, body },
-    git: { ...state.git, notice: null },
-  }))
-  await io.scroll({ to: 'start', in: S.PANE }).catch(() => undefined)
-}
-
-export const editPrForm = (io: Io, change: (form: PrForm) => PrForm) =>
-  S.put(io, 'prForm', form => (form === null ? null : change(form)))
-
-/** Starts the description again from another template. */
-export const chooseTemplate = async (io: Io, template: string): Promise<void> => {
-  const form = await S.pick(io, 'prForm')
-  if (form === null) return
-  const body = await io.readText(`${await rootOf(io)}/${template}`).catch(() => '')
-  await io.writeText(form.bodyFile, body)
-  await editPrForm(io, f => ({ ...f, template, body }))
-}
-
-/** Opens the description in the person's editor; the form reads it back as the pane refreshes. */
-export const editPrBody = async (io: Io): Promise<void> => {
-  const form = await S.pick(io, 'prForm')
-  if (form === null) return
-  io.toast((await openExternal(io, form.bodyFile)) ? 'Edit the description, save it, and come back' : 'Could not open an editor')
-}
-
-const reloadPrBody = async (io: Io): Promise<void> => {
-  const form = await S.pick(io, 'prForm')
-  if (form === null || (await S.pick(io, 'screen')) !== 'pr') return
-  const body = await io.readText(form.bodyFile).catch(() => form.body)
-  if (body !== form.body) await editPrForm(io, f => ({ ...f, body }))
-}
-
-/** Pushes the branch when the remote lacks it, then creates the PR with `gh`. */
-export const createPr = async (io: Io): Promise<void> => {
-  const form = await S.pick(io, 'prForm')
-  if (form === null) return
-  if (form.title.trim() === '') {
-    await putGit(io, git => ({ ...git, notice: { ok: false, text: 'Write a title first.' } }))
-    return
-  }
-  const isDone = await operate(io, 'Creating the PR…', async root => {
+/**
+ * Pushes the branch when the remote lacks it or is behind, then opens GitHub's page for a new PR in the browser:
+ * GitHub picks the base (the repository's default branch), the template, reviewers and draft.
+ */
+export const openPrPage = async (io: Io): Promise<void> => {
+  const web = (await S.pick(io, 'git')).web
+  if (!web) return
+  await operate(io, 'Opening the PR page…', async root => {
     const snap = await S.pick(io, 'snapshot')
     if (snap?.upstream === undefined || (snap.ahead ?? 0) > 0) {
       const args = await pushArgs(io, root, false)
@@ -714,17 +681,14 @@ export const createPr = async (io: Io): Promise<void> => {
       const pushed = await runGit(io, root, args, { timeoutMs: NETWORK_MS })
       if (pushed.exitCode !== 0) return outcome(pushed, '')
     }
-    const args = ['pr', 'create', '--title', form.title.trim(), '--body-file', form.bodyFile, '--base', form.base.trim() || 'main']
-    if (form.draft) args.push('--draft')
-    const created = await io.run(['gh', ...args], root, { timeoutMs: NETWORK_MS })
-    if (created.exitCode !== 0) return outcomeOf(false, `${created.stderr}\n${created.stdout}`, 'gh pr create failed')
-    const url = created.stdout.trim().split('\n').pop() ?? ''
+    // The branch's name on the remote: its upstream's, which a push just set when it had none.
+    const upstream = (await runGit(io, root, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])).stdout.trim()
+    const remote = await remoteOf(io, root)
+    const branch = remote !== undefined && upstream.startsWith(`${remote}/`) ? upstream.slice(remote.length + 1) : (snap?.branch ?? '')
+    const url = compareUrl(web, branch)
 
-    return { ok: true, text: `Created ${url}` }
+    return (await openExternal(io, url)) ? { ok: true, text: 'Opened the new PR page in the browser' } : { ok: false, text: 'Could not open the browser', detail: url }
   })
-  if (!isDone) return
-  await io.set(state => ({ ...state, screen: 'tree', prForm: null }))
-  await refreshPr(io)
 }
 
 /** Opens the history screen and reads the recent commits. */

@@ -69,7 +69,10 @@ export const register: Register = on => {
     })
     await A.loadPrefs(engine)
     void A.takePromptBase(engine, 'session').catch(() => undefined)
-    void A.refresh(engine).catch(() => undefined)
+    // A reload with the pane open: the git controls need gh and the remote read (checkGh skips what it knows).
+    void A.refresh(engine)
+      .then(async () => ((await S.pick(engine, 'isOpen')) ? A.checkGh(engine) : undefined))
+      .catch(() => undefined)
     // Follows the transcript in view: the drawing notes it, this tick (outside any drawing) switches the tree.
     $.clock.every(FOLLOW_MS, () => {
       void A.watchSelection(engine).catch(() => undefined)

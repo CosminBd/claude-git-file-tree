@@ -168,8 +168,8 @@ The buttons below the commit box show only when they can do an operation:
 | **Pull** | Pull with `--ff-only` |
 | **Fetch** | Fetch from the remote |
 | **Undo commit** | Remove the last commit if it is not pushed (`git reset --soft`). The changes stay staged |
-| **Create PR** | Create a PR for the branch. You must install the GitHub CLI (`gh`) and log in |
-| **PR #14 open** | Open the PR of the branch in the browser |
+| **Create PR ↗** | Push the branch if necessary, then open the GitHub page that creates a PR. GitHub sets the base branch, the template, the reviewers and the draft state |
+| **PR #14 open** | Open the PR of the branch in the browser. You must install the GitHub CLI (`gh`) and log in |
 
 The line below the buttons shows the result of the last operation. If an operation fails, the line shows the git message.
 
@@ -202,7 +202,7 @@ Only **Write message** uses the model. It sends the staged diff (up to 24,000 ch
 
 - Claude Code with support for mods (function hooks).
 - Git. Start Claude Code in a git repository.
-- For pull requests: the GitHub CLI (`gh`). You must log in.
+- For pull requests: a remote on GitHub. To show the PR of the branch, the GitHub CLI (`gh`). You must log in.
 
 ## Development
 

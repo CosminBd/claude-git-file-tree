@@ -68,7 +68,7 @@ export type Snapshot = {
 
 export type View = 'changes' | 'all'
 
-export type Screen = 'tree' | 'preview' | 'log' | 'pr'
+export type Screen = 'tree' | 'preview' | 'log'
 
 /** The branch's pull request, as `gh pr view` reports it. */
 export type PrInfo = { number: number; url: string; state: string; isDraft: boolean }
@@ -86,22 +86,10 @@ export type GitUi = {
   /** Whether `gh` is installed and signed in; null until asked. */
   hasGh: boolean | null
   pr: PrInfo | null
+  /** The repository's page on GitHub (`https://github.com/o/r`); null off GitHub or until read. */
+  web: string | null
   /** The branch PRs go to (`main`); null until read. */
   base: string | null
-}
-
-/** The pull request form. */
-export type PrForm = {
-  title: string
-  base: string
-  draft: boolean
-  /** The repository's PR templates, root-relative, and the one the description started from. */
-  templates: string[]
-  template: string | null
-  /** Where the description is kept for editing: a file in the git directory. */
-  bodyFile: string
-  /** The description as last read from that file. */
-  body: string
 }
 
 export type PreviewMode = 'diff' | 'source' | 'rendered'
@@ -168,7 +156,6 @@ export type UiState = {
   /** The recent commits the history screen lists; null until read. */
   log: CommitInfo[] | null
   git: GitUi
-  prForm: PrForm | null
   preview: Preview | null
   /** The file Claude edited last, root-relative. */
   touched: string | null

@@ -55,11 +55,23 @@ export const parsePrView = (stdout: string): PrInfo | null => {
   }
 }
 
-/** The PR templates among the repository's files, in the places GitHub reads them. */
-export const findTemplates = (paths: readonly string[]): string[] =>
-  paths
-    .filter(path => /^(\.github\/|docs\/)?pull_request_template\.md$/i.test(path) || /^\.github\/pull_request_template\/[^/]+\.md$/i.test(path))
-    .sort((a, b) => a.localeCompare(b))
+/**
+ * A remote's web page (`https://github.com/o/r`), from its fetch URL: `git@host:o/r.git`, `ssh://git@host:22/o/r.git`,
+ * `https://host/o/r.git`. Null for any other form (a local path).
+ */
+export const webUrlOf = (remote: string): string | null => {
+  const scp = /^[\w.-]+@([\w.-]+):\/?([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(remote.trim())
+  if (scp) return `https://${scp[1]}/${scp[2]}`
+  const url = /^(?:ssh|git|https?):\/\/(?:[^@/]+@)?([\w.-]+)(:\d+)?\/([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(remote.trim())
+  if (!url) return null
+  const port = remote.startsWith('http') ? (url[2] ?? '') : ''
+
+  return `${remote.startsWith('http:') ? 'http' : 'https'}://${url[1]}${port}/${url[3]}`
+}
+
+/** GitHub's page that opens a PR for `branch` against the repository's default branch. */
+export const compareUrl = (web: string, branch: string): string =>
+  `${web}/compare/${branch.split('/').map(encodeURIComponent).join('/')}?expand=1`
 
 /** A PR's state as the header says it: `PR #14 open`, `PR #14 draft`, `PR #14 merged`. */
 export const prLabel = (pr: PrInfo): string => `PR #${pr.number} ${pr.isDraft && pr.state === 'OPEN' ? 'draft' : pr.state.toLowerCase()}`

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { cleanMessage, discardCommands, findTemplates, MESSAGE_DIFF_CHARS, messagePrompt, outcomeOf, parsePrView, prLabel } from '../hooks/ops'
+import { cleanMessage, compareUrl, discardCommands, MESSAGE_DIFF_CHARS, messagePrompt, outcomeOf, parsePrView, prLabel, webUrlOf } from '../hooks/ops'
 
 describe('ops', () => {
   test('git output becomes a status line, the rest kept for a failure', () => {
@@ -21,10 +21,13 @@ describe('ops', () => {
     expect(discardCommands({ path: 'm.php', status: 'modified' })).toEqual([['restore', '--source=HEAD', '--staged', '--worktree', '--', 'm.php']])
   })
 
-  test('PR templates in the places GitHub reads them', () => {
-    expect(
-      findTemplates(['README.md', '.github/pull_request_template.md', 'docs/PULL_REQUEST_TEMPLATE.md', '.github/pull_request_template/bug.md', 'src/pull_request_template.md']),
-    ).toEqual(['.github/pull_request_template.md', '.github/pull_request_template/bug.md', 'docs/PULL_REQUEST_TEMPLATE.md'])
+  test('the web page of a remote, and the page that opens a PR', () => {
+    expect(webUrlOf('git@github.com:o/r.git')).toBe('https://github.com/o/r')
+    expect(webUrlOf('ssh://git@github.com:22/o/r.git')).toBe('https://github.com/o/r')
+    expect(webUrlOf('https://github.com/o/r')).toBe('https://github.com/o/r')
+    expect(webUrlOf('https://token@git.corp.io:8443/o/r.git/')).toBe('https://git.corp.io:8443/o/r')
+    expect(webUrlOf('/srv/git/r.git')).toBeNull()
+    expect(compareUrl('https://github.com/o/r', 'feat/a#1')).toBe('https://github.com/o/r/compare/feat/a%231?expand=1')
   })
 
   test('gh pr view, and the label it gives', () => {

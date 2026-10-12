@@ -501,33 +501,27 @@ test('discard in the preview needs a second press', async ($, on) => {
   expect(didRun('restore --source=HEAD --staged --worktree -- app/Http/Landing.php')).toBe(true)
 })
 
-test('Create PR starts from the template, pushes, and runs gh', async ($, on) => {
+test('Create PR pushes the branch, then opens GitHub\'s new PR page', async ($, on) => {
   world(on)
-  answers['gh auth status'] = { stdout: '' }
   answers['rev-list --left-right --count HEAD...@{u}'] = { stdout: '2\t0\n' }
-  answers['symbolic-ref --quiet --short refs/remotes/origin/HEAD'] = { stdout: 'origin/main\n' }
-  answers['rev-parse --absolute-git-dir'] = { stdout: '/repo/.git\n' }
-  answers['log -1 --format=%s'] = { stdout: 'Add the landing\n' }
-  answers['ls-files -z --cached --others --exclude-standard'] = {
-    stdout: 'app/Http/Landing.php\0.github/pull_request_template.md\0docs/NOTES.md\0',
-  }
+  answers['remote'] = { stdout: 'origin\n' }
+  answers['remote get-url origin'] = { stdout: 'git@github.com:o/r.git\n' }
+  answers['push'] = { stdout: '' }
   await start($)
   const ui = await mountPane($)
   await ui.press({ key: 'pr-create' })
-  expect((await ui.find({ key: 'pr-title' }))?.text).toContain('Add the landing')
-  expect((await ui.find({ key: 'pr-base' }))?.text).toContain('main')
-  expect(written.find(file => file.path === '/repo/.git/PR_EDITMSG.md')?.text).toContain('# Notes')
-  expect(await ui.find({ type: 'Text', text: 'Notes' })).toBeDefined()
-
-  answers['push'] = { stdout: '' }
-  answers['gh pr create --title Add the landing --body-file /repo/.git/PR_EDITMSG.md --base main --draft'] = {
-    stdout: 'https://github.com/o/r/pull/7\n',
-  }
-  await ui.press({ key: 'pr-draft' })
-  await ui.press({ key: 'pr-submit' })
   expect(didRun('push')).toBe(true)
-  expect(didRun('gh pr create --title Add the landing --body-file /repo/.git/PR_EDITMSG.md --base main --draft')).toBe(true)
-  expect(await ui.find({ type: 'Text', text: '✓ Created https://github.com/o/r/pull/7' })).toBeDefined()
+  expect(opened).toEqual([['open', 'https://github.com/o/r/compare/feature/landing?expand=1']])
+  expect(ran.some(entry => entry.args.startsWith('gh pr create'))).toBe(false)
+})
+
+test('no Create PR off GitHub', async ($, on) => {
+  world(on)
+  answers['remote'] = { stdout: 'origin\n' }
+  answers['remote get-url origin'] = { stdout: 'git@gitlab.com:o/r.git\n' }
+  await start($)
+  const ui = await mountPane($)
+  expect(await ui.find({ key: 'pr-create' })).toBeUndefined()
 })
 
 /** The subagents `$.agent.list()` answers. */
