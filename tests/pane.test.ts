@@ -352,6 +352,27 @@ test('history pushes, and moves the pushed commits under the upstream', async ($
   expect(await ui.find({ key: 'commit:aaa1111111' })).toBeDefined()
 })
 
+test('force push is there with nothing to push, and a PR made on GitHub replaces Create PR', async ($, on) => {
+  world(on)
+  answers['rev-list --left-right --count HEAD...@{u}'] = { stdout: '0\t0\n' }
+  answers['gh auth status'] = { stdout: '' }
+  answers['remote'] = { stdout: 'origin\n' }
+  answers['remote get-url origin'] = { stdout: 'https://github.com/o/r.git\n' }
+  await start($)
+  const ui = await mountPane($)
+  expect(await ui.find({ key: 'push' })).toBeUndefined()
+  expect(await ui.find({ key: 'force-push' })).toBeDefined()
+  expect(await ui.find({ key: 'pr-create' })).toBeDefined()
+
+  answers['gh pr view --json number,url,state,isDraft'] = { stdout: '{"number":7,"url":"https://github.com/o/r/pull/7","state":"OPEN","isDraft":false}' }
+  await clock.advance(60_000)
+  expect(await ui.find({ key: 'pr-create' })).toBeUndefined()
+  expect((await ui.find({ key: 'pr-open' }))?.text).toBe('PR #7 open')
+  await ui.press({ key: 'history' })
+  expect(await ui.find({ key: 'pr-create' })).toBeUndefined()
+  expect(await ui.find({ key: 'pr-open' })).toBeDefined()
+})
+
 test('a detached HEAD has nothing to push', async ($, on) => {
   world(on)
   answers['branch --show-current'] = { stdout: '' }
@@ -500,7 +521,7 @@ test('a diverged branch offers a force push, which needs a second press', async 
 
   await ui.press({ key: 'force-push' })
   expect(ran.some(entry => entry.args.startsWith('push'))).toBe(false)
-  expect(await ui.find({ type: 'Text', text: 'Press again to force push' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Press again to force push (with lease)' })).toBeDefined()
 
   await ui.press({ key: 'force-push' })
   expect(didRun('push --force-with-lease --force-if-includes')).toBe(true)

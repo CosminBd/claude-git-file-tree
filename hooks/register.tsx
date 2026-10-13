@@ -8,6 +8,8 @@ import { renderFooter, renderPane } from './view'
 
 /** How often git is read while the pane is open; four times slower while it is closed. */
 const POLL_MS = 3000
+/** Polls between two reads of the branch's PR: a minute. */
+const PR_TICKS = 20
 
 /** How soon the tree follows a switch to a subagent's transcript, or back. */
 const FOLLOW_MS = 250
@@ -84,7 +86,10 @@ export const register: Register = on => {
       ticks += 1
       void (async () => {
         await A.expireConfirm(engine)
-        if ((await S.pick(engine, 'isOpen')) || ticks % 4 === 0) await A.refresh(engine)
+        const isOpen = await S.pick(engine, 'isOpen')
+        if (isOpen || ticks % 4 === 0) await A.refresh(engine)
+        // A PR made or merged on GitHub (Create PR opens the browser): read it again each minute.
+        if (isOpen && ticks % PR_TICKS === 0) await A.refreshPr(engine)
       })().catch(() => undefined)
     })
 

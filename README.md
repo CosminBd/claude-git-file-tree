@@ -164,11 +164,11 @@ The buttons below the commit box show only when they can do an operation:
 | --- | --- |
 | **Push** | Push the branch. The key is `p` |
 | **Push branch** | Push a branch that has no upstream. The upstream becomes `origin` |
-| **Force push** | Push with `--force-with-lease --force-if-includes`. Use it after an amend |
+| **Force push** | Push with `--force-with-lease --force-if-includes`. It shows when the branch has an upstream. Use it after an amend or a rebase |
 | **Pull** | Pull with `--ff-only` |
 | **Fetch** | Fetch from the remote |
 | **Undo commit** | Remove the last commit if it is not pushed (`git reset --soft`). The changes stay staged |
-| **Create PR ↗** | Push the branch if necessary, then open the GitHub page that creates a PR. GitHub sets the base branch, the template, the reviewers and the draft state |
+| **Create PR ↗** | Push the branch if necessary, then open the GitHub page that creates a PR. It shows only when the branch has no PR. The pane looks for the PR again each minute. GitHub sets the base branch, the template, the reviewers and the draft state |
 | **PR #14 open** | Open the PR of the branch in the browser. You must install the GitHub CLI (`gh`) and log in |
 
 The line below the buttons shows the result of the last operation. If an operation fails, the line shows the git message.

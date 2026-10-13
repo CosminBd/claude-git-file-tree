@@ -243,7 +243,7 @@ const gitHint = (isAll: boolean, isCommit: boolean, baseMode: string): string =>
 }
 
 /** What a destructive button says after its first press. */
-const CONFIRM_TEXT: Record<string, string> = { force: 'Press again to force push', undo: 'Press again to undo the last commit' }
+const CONFIRM_TEXT: Record<string, string> = { force: 'Press again to force push (with lease)', undo: 'Press again to undo the last commit' }
 
 /** The line under the toolbar: the running operation, a press to repeat, or how the last one went. */
 const statusLine = async (c: Ctx): Promise<RenderElement | null> => {
@@ -298,7 +298,8 @@ const syncRow = async (c: Ctx, snap: Snapshot): Promise<RenderElement> => {
       ) : !isDiverged ? (
         <Button key="push" plain hotkey="p" onPress={() => A.push(c.io)}>{hasUpstream ? 'Push' : 'Push branch'}</Button>
       ) : null}
-      {isDiverged ? <Button key="force-push" plain onPress={() => A.push(c.io, true)}>Force push</Button> : null}
+      {/* With lease, on a second press: after an amend or a rebase, or to put the remote back to the local branch. */}
+      {hasUpstream && !isDetached ? <Button key="force-push" plain onPress={() => A.push(c.io, true)}>Force push</Button> : null}
       {behind > 0 && !isDiverged ? <Button key="pull" plain onPress={() => A.pull(c.io)}>Pull</Button> : null}
       {hasUpstream ? <Button key="fetch" plain onPress={() => A.fetch(c.io)}>Fetch</Button> : null}
       {ahead > 0 ? <Button key="undo" plain onPress={() => A.undoCommit(c.io)}>Undo commit</Button> : null}

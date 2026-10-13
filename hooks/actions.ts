@@ -186,6 +186,8 @@ const refreshOnce = async (io: Io, forcePreview: string | null): Promise<void> =
   const previous = await S.pick(io, 'snapshot')
   const hasChanged = !sameJson(previous, next)
   if (hasChanged) await S.put(io, 'snapshot', () => next)
+  // Another branch or work tree (a subagent's): another PR, or none.
+  if (previous !== null && (previous.root !== next.root || previous.branch !== next.branch)) void refreshPr(io).catch(() => undefined)
 
   if ((await S.pick(io, 'view')) === 'all' && next.error === undefined) {
     const list = await (commit ? listTree(gitOf(io), next.root, commit.sha) : listAll(gitOf(io), next.root)).catch(() => null)
@@ -698,6 +700,7 @@ export const showLog = async (io: Io): Promise<void> => {
   await S.put(io, 'screen', () => 'log')
   await io.scroll({ to: 'start', in: S.PANE }).catch(() => undefined)
   await readLog(io)
+  await refreshPr(io)
 }
 
 const readLog = async (io: Io): Promise<void> => {
