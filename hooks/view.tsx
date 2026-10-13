@@ -285,7 +285,8 @@ const syncRow = async (c: Ctx, snap: Snapshot): Promise<RenderElement> => {
   const ahead = snap.ahead ?? 0
   const behind = snap.behind ?? 0
   const hasUpstream = snap.upstream !== undefined
-  const isDetached = snap.branch === 'HEAD' || snap.branch === ''
+  // The scan's names for no branch (a branch name cannot hold a space).
+  const isDetached = snap.branch.startsWith('detached at ') || snap.branch === 'no commits yet' || snap.branch === ''
   const isDiverged = ahead > 0 && behind > 0
   const canPr = Boolean(git.web) && git.pr === null && !isDetached && snap.branch !== (git.base ?? 'main')
   const blocker = pushBlocker(snap, isDetached, isDiverged)
@@ -848,7 +849,10 @@ const renderLog = async (c: Ctx): Promise<RenderElement> => {
   const { Box, Text, Button } = c.t
   const log = await S.pick(c.io, 'log')
   const shown = await S.pick(c.io, 'commit')
-  const upstream = (await S.pick(c.io, 'snapshot'))?.upstream
+  const snap = await S.pick(c.io, 'snapshot')
+  const upstream = snap?.upstream
+  // Push, pull and fetch act on the branch, whichever commit the tree shows.
+  const canSync = snap !== null && snap.error === undefined && (await sharedAgent(c)) === null
   const isKnown = (log ?? []).some(commit => commit.isPushed !== undefined)
   const unpushed = (log ?? []).filter(commit => commit.isPushed === false)
   const pushed = (log ?? []).filter(commit => commit.isPushed !== false)
@@ -856,6 +860,12 @@ const renderLog = async (c: Ctx): Promise<RenderElement> => {
   return (
     <Box flexDirection="column">
       <Button key="back" plain hotkey="b" onPress={() => S.put(c.io, 'screen', () => 'tree')}>‹ Back</Button>
+      {canSync ? (
+        <Box flexDirection="column" marginTop={1}>
+          {await syncRow(c, snap)}
+          {await statusLine(c)}
+        </Box>
+      ) : null}
       <Box flexDirection="column" marginTop={1}>
         <Button key="commit:working" plain {...(shown === null ? { autoFocus: true as const } : {})} onPress={() => A.showCommit(c.io, null)}>
           {shown === null ? <Text bold>Working changes</Text> : 'Working changes'}

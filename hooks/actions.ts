@@ -456,6 +456,8 @@ const operate = async (io: Io, busy: string, work: (root: string) => Promise<Out
   }
   await putGit(io, git => ({ ...git, busy: null, notice: result }))
   await refresh(io)
+  // The history marks what is pushed: a push, pull or undo there changes it.
+  if ((await S.pick(io, 'screen')) === 'log') await readLog(io)
 
   return result.ok
 }
@@ -695,6 +697,10 @@ export const openPrPage = async (io: Io): Promise<void> => {
 export const showLog = async (io: Io): Promise<void> => {
   await S.put(io, 'screen', () => 'log')
   await io.scroll({ to: 'start', in: S.PANE }).catch(() => undefined)
+  await readLog(io)
+}
+
+const readLog = async (io: Io): Promise<void> => {
   const log = await listCommits(gitOf(io), await rootOf(io)).catch(() => [])
   await S.put(io, 'log', () => log)
 }

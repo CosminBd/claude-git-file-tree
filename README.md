@@ -182,7 +182,7 @@ The line below the buttons shows the result of the last operation. If an operati
 
 ## History
 
-Push `h` to show the last 50 commits of the current branch. Each commit shows its age and its author. The commits that are not pushed show first.
+Push `h` to show the last 50 commits of the current branch. Each commit shows its age and its author. The commits that are not pushed show first. The Push, Pull and Fetch buttons show at the top, so you can push the commits from the history.
 
 ![The history: the commits that are not pushed, then the commits on origin/main](docs/screenshots/history.png)
 

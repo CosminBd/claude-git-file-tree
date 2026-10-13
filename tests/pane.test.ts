@@ -333,6 +333,34 @@ test('history puts the commits not pushed above those the upstream has', async (
   expect(await ui.find({ key: 'commit:ddd2222222' })).toBeDefined()
 })
 
+test('history pushes, and moves the pushed commits under the upstream', async ($, on) => {
+  world(on)
+  answers['rev-list --left-right --count HEAD...@{u}'] = { stdout: '1\t0\n' }
+  answers['log -n50 --format=%H%x1f%h%x1f%ar%x1f%an%x1f%s'] = { stdout: TWO_COMMITS }
+  answers['rev-list --max-count=50 @{u}..HEAD'] = { stdout: 'aaa1111111\n' }
+  answers['push'] = { stdout: '' }
+  await start($)
+  const ui = await mountPane($)
+  await ui.press({ key: 'history' })
+  expect(await ui.find({ key: 'fetch' })).toBeDefined()
+  answers['rev-list --left-right --count HEAD...@{u}'] = { stdout: '0\t0\n' }
+  answers['rev-list --max-count=50 @{u}..HEAD'] = { stdout: '' }
+  await ui.press({ key: 'push' })
+  expect(didRun('push')).toBe(true)
+  expect(await ui.find({ type: 'Text', text: 'Not pushed 1' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'Push: nothing to push, commit first' })).toBeDefined()
+  expect(await ui.find({ key: 'commit:aaa1111111' })).toBeDefined()
+})
+
+test('a detached HEAD has nothing to push', async ($, on) => {
+  world(on)
+  answers['branch --show-current'] = { stdout: '' }
+  await start($)
+  const ui = await mountPane($)
+  expect(await ui.find({ key: 'push' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'Push: not on a branch' })).toBeDefined()
+})
+
 test('with no upstream, history compares with every remote branch', async ($, on) => {
   world(on)
   answers['rev-parse --abbrev-ref --symbolic-full-name @{u}'] = { exitCode: 128, stdout: '' }
