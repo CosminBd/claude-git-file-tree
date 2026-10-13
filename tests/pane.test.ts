@@ -62,6 +62,9 @@ let answers: Record<string, { exitCode?: number; stdout: string }> = {}
 /** Answers for git run in another work tree (a subagent's worktree), by its root. */
 let trees: Record<string, Record<string, string>> = {}
 
+/** Folders that are no longer on disk (a removed worktree). */
+let removed: string[] = []
+
 /** Files the plugin wrote. */
 let written: { path: string; text: string }[] = []
 
@@ -77,6 +80,7 @@ const world = (on: On) => {
   answers = {}
   trees = {}
   written = []
+  removed = []
   mock.store(on)
   clock = mock.clock(on)
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -103,7 +107,11 @@ const world = (on: On) => {
 
     return { value: { exitCode: answer.exitCode ?? 0, stdout: answer.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  on('fs.stat', () => ({ value: { kind: 'file' as const, size: 40, mtimeMs: 0, isLink: false } }))
+  on('fs.stat', ($, e) => {
+    if (removed.includes(e.path)) throw new Error(`ENOENT: no such file or directory, stat '${e.path}'`)
+
+    return { value: { kind: 'file' as const, size: 40, mtimeMs: 0, isLink: false } }
+  })
   on('fs.read', () => ({ value: '# Notes\n\nSome *markdown*.\n\n| Key | Value |\n| --- | --- |\n| a | `1` |\n' }))
   on('fs.write', ($, e) => {
     written.push({ path: e.path, text: e.text })
@@ -626,6 +634,23 @@ test('viewing a subagent in a worktree reads git in that worktree', async ($, on
   expect(await ui.find({ key: 'row:app/Http/Landing.php' })).toBeUndefined()
   // Its own tree: the git operations act on the worktree.
   expect(await ui.find({ key: 'stage-all' })).toBeDefined()
+})
+
+test('a subagent whose worktree was removed says so, and runs no git there', async ($, on) => {
+  world(on)
+  const tree = '/repo/.claude/worktrees/cart'
+  trees[tree] = { 'rev-parse --show-toplevel': `${tree}\n` }
+  on('tool.call', () => ({ result: {}, text: '' }) as never)
+  on('agent.list', () => ({ value: AGENTS }))
+  await start($)
+  await $.tool.call({ tool: 'Edit', file_path: `${tree}/src/cart.ts`, agentId: 'agent-1' } as never)
+  const ui = await $.ui.mount({ plugin: 'git-file-tree', surface: 'terminal', component: 'Pane', requestId: 'files', props: PANE_PROPS })
+  removed = [tree]
+  await ui.redraw({ ...PANE_PROPS, view: { agentId: 'agent-1' } })
+  await clock.advance(300)
+  expect(await ui.find({ type: 'Text', text: "This agent's worktree is gone" })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: `${tree} was removed.` })).toBeDefined()
+  expect(await ui.find({ key: 'refresh' })).toBeUndefined()
 })
 
 test('viewing a subagent the pane saw no file of finds its worktree by its name', async ($, on) => {

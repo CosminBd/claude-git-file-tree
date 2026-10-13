@@ -62,7 +62,8 @@ export type Snapshot = {
   /** Commits on the branch the upstream lacks, and the reverse, as of the last fetch. */
   ahead?: number
   behind?: number
-  error?: 'not-a-repo' | 'git-failed'
+  /** `gone`: the folder git would run in no longer exists (a subagent's worktree, removed). */
+  error?: 'not-a-repo' | 'git-failed' | 'gone'
   message?: string
 }
 

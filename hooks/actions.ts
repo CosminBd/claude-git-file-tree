@@ -182,7 +182,10 @@ const refreshOnce = async (io: Io, forcePreview: string | null): Promise<void> =
   const base = mode === 'prompt' && commit === null ? await S.pick(io, 'promptBase') : null
   const now = base !== null ? await workTree(io, cwd, 'now') : null
   const prompt = base !== null && now !== null ? { before: base.tree, now, label: base.at === 'prompt' ? 'your last prompt' : 'the session start' } : null
-  const next = await scan(gitOf(io), io.run, cwd, mode, commit, prompt).catch(error => failed(cwd, error, mode))
+  const isThere = await io.stat(cwd).then(() => true, () => false)
+  const next: Snapshot = isThere
+    ? await scan(gitOf(io), io.run, cwd, mode, commit, prompt).catch(error => failed(cwd, error, mode))
+    : { ...failed(cwd, '', mode), error: 'gone', message: `${cwd} was removed.` }
   const previous = await S.pick(io, 'snapshot')
   const hasChanged = !sameJson(previous, next)
   if (hasChanged) await S.put(io, 'snapshot', () => next)

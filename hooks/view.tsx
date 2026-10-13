@@ -355,6 +355,15 @@ const renderTree = async (c: Ctx): Promise<RenderElement> => {
   if (snap === null) {
     return <Text dimColor>{isLoading ? 'Reading git…' : 'Nothing read yet.'}</Text>
   }
+  if (snap.error === 'gone') {
+    return (
+      <Box flexDirection="column">
+        <Text color="warning">This agent's worktree is gone</Text>
+        <Text dimColor>{snap.message ?? ''}</Text>
+        <Text dimColor>Its changes are on its branch, if it committed them. Go back to the main conversation to see the session's files.</Text>
+      </Box>
+    )
+  }
   if (snap.error !== undefined) {
     return (
       <Box flexDirection="column">
